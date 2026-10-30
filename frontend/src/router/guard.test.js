@@ -11,8 +11,16 @@ vi.mock('@/views/CalendarView.vue', () => ({ default: { name: 'CalendarView', re
 vi.mock('@/views/LoginView.vue', () => ({ default: { name: 'LoginView', render: () => null } }))
 vi.mock('@/views/NotFoundView.vue', () => ({ default: { name: 'NotFoundView', render: () => null } }))
 
+// 只把 inIframe 固定为 true：jsdom 里 window.top === window.self，
+// 否则「每次核验」分支会走整页跳转，测试环境无法断言
+vi.mock('@/utils/oauth', async (importOriginal) => {
+  const actual = await importOriginal()
+  return { ...actual, inIframe: () => true }
+})
+
 import router from '@/router'
 import { useAuthStore } from '@/stores/auth'
+import { markEntryVerified } from '@/utils/oauth'
 
 function setAuth({ checked = true, user = null }) {
   const auth = useAuthStore()
@@ -42,5 +50,23 @@ describe('router 登录守卫', () => {
     setAuth({ user: null })
     await router.push('/login')
     expect(router.currentRoute.value.path).toBe('/login')
+  })
+
+  it('要求每次核验身份时，残留的旧登录态不能直接放行 → /login?verify=1', async () => {
+    setAuth({ user: { id: 'u1', nickname: '张三' } })
+    useAuthStore().verifyRequired = true
+    await router.push('/farm')
+    expect(router.currentRoute.value.path).toBe('/login')
+    expect(router.currentRoute.value.query.verify).toBe('1')
+    expect(router.currentRoute.value.query.redirect).toBe('/farm')
+  })
+
+  it('授权回调留下的一次性通行证：本次加载直接放行', async () => {
+    setAuth({ user: { id: 'u1', nickname: '张三' } })
+    useAuthStore().verifyRequired = true
+    markEntryVerified()
+    await router.push('/farm')
+    expect(router.currentRoute.value.name).toBe('farm')
+    expect(useAuthStore().verified).toBe(true)
   })
 })

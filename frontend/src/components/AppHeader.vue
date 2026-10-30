@@ -47,7 +47,8 @@
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item disabled>{{ auth.user.nickname }}</el-dropdown-item>
-              <el-dropdown-item divided @click="onLogout">退出登录</el-dropdown-item>
+              <el-dropdown-item divided @click="onSwitchAccount">切换魔搭账号</el-dropdown-item>
+              <el-dropdown-item @click="onLogout">退出登录</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -68,10 +69,12 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { NAV_ITEMS } from '@/router'
 import LocationSelector from '@/components/LocationSelector.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import { useAuthStore } from '@/stores/auth'
+import { startModelScopeLogin } from '@/utils/oauth'
 
 const props = defineProps({
   /** 当前视口宽度（由 App.vue 传入，用于切换紧凑模式） */
@@ -100,6 +103,20 @@ function onLocationChanged() {
 async function onLogout() {
   await auth.logout()
   router.push('/login')
+}
+
+/**
+ * 切换账号：带 prompt=login 重新发起授权。
+ * 魔搭授权页用的是浏览器里 modelscope.cn 的登录态，不在本应用内，
+ * 所以若魔搭侧仍返回原账号，需要先在 modelscope.cn 退出。
+ */
+function onSwitchAccount() {
+  const { popup } = startModelScopeLogin({ switchAccount: true, next: route.fullPath })
+  ElMessage.info(
+    popup
+      ? '已在新窗口打开魔搭授权页，完成授权后自动切换账号'
+      : '正在跳转魔搭授权页…'
+  )
 }
 </script>
 

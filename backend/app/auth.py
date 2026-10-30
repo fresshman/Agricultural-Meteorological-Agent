@@ -160,6 +160,12 @@ def _upsert_user(provider: str, ext_id: str, nickname: str, avatar: str | None =
             )
             conn.commit()
             return user_id
+        # 昵称/头像以魔搭侧为准，避免改名后界面一直显示旧资料
+        conn.execute(
+            "UPDATE users SET nickname=?, avatar=? WHERE id=?",
+            (nickname, avatar, row["id"]),
+        )
+        conn.commit()
         return row["id"]
     finally:
         conn.close()

@@ -10,7 +10,9 @@
         </span>
         <div>
           <h1 class="login-title">农业气象智能体</h1>
-          <p class="login-slogan">登录后，你的大豆问答、地块与农事记录都会单独保存在你的账户下</p>
+          <p class="login-slogan">
+            每次打开都用你的魔搭账号登录一次；问答、地块与农事记录只保存在你自己的账号下
+          </p>
         </div>
       </div>
 
@@ -20,39 +22,36 @@
         :closable="false"
         show-icon
         title="魔搭授权失败"
-        description="请重试，或改用演示登录。"
+        description="请重试；若反复失败，可点「切换魔搭账号」重新授权。"
         class="login-alert"
       />
 
-      <template v-if="auth.user">
-        <div class="login-user">
-          <el-avatar :size="44" :src="auth.user.avatar || undefined">{{ avatarText }}</el-avatar>
-          <div class="login-user__meta">
-            <div class="login-user__name">{{ auth.user.nickname }}</div>
-            <div class="login-user__sub">已登录 · 数据已隔离到你的账户</div>
-          </div>
-        </div>
-        <el-button type="primary" class="login-btn" @click="goHome">进入工作台</el-button>
-        <el-button class="login-btn" plain @click="onLogout">退出登录</el-button>
-      </template>
+      <el-button
+        type="primary"
+        class="login-btn"
+        size="large"
+        :loading="oauthPending"
+        @click="openLogin(false)"
+      >
+        <svg class="login-btn__logo" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.3 6.9 3.8L12 11.9 5.1 8.1 12 4.3ZM5 9.9l6 3.3v6.6l-6-3.3V9.9Zm8 9.9v-6.6l6-3.3v6.6l-6 3.3Z" fill="currentColor" />
+        </svg>
+        使用魔搭（ModelScope）账号登录
+      </el-button>
 
-      <template v-else>
-        <el-button
-          type="primary"
-          class="login-btn"
-          size="large"
-          :loading="oauthPending"
-          @click="openModelScopeLogin"
-        >
-          <svg class="login-btn__logo" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-            <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.3 6.9 3.8L12 11.9 5.1 8.1 12 4.3ZM5 9.9l6 3.3v6.6l-6-3.3V9.9Zm8 9.9v-6.6l6-3.3v6.6l-6 3.3Z" fill="currentColor" />
-          </svg>
-          使用魔搭（ModelScope）账号登录
-        </el-button>
-        <p v-if="oauthPending" class="login-tip login-tip--pending">
-          已在新窗口打开魔搭授权页，完成授权后本页会自动进入工作台。
-        </p>
+      <p v-if="oauthPending" class="login-tip login-tip--pending">
+        已在新窗口打开魔搭授权页，完成授权后本页会自动进入工作台。
+      </p>
 
+      <div class="login-sub">
+        <el-button link type="primary" @click="openLogin(true)">切换魔搭账号</el-button>
+      </div>
+
+      <p class="login-tip">
+        登录以<strong>你浏览器当前登录的魔搭账号</strong>为准；刚换过账号的话，请点「切换魔搭账号」。
+      </p>
+
+      <template v-if="auth.devEnabled">
         <div class="login-divider"><span>或</span></div>
 
         <div class="login-dev">
@@ -65,17 +64,18 @@
           />
           <el-button class="login-dev__btn" @click="onDevLogin" :loading="devLoading">演示登录</el-button>
         </div>
-        <p class="login-tip">演示登录仅用于本地/未配置 OAuth 时体验，生产环境建议用魔搭账号。</p>
+        <p class="login-tip">演示登录仅用于本地/未配置 OAuth 时体验，不绑定魔搭账号。</p>
       </template>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import { markEntryVerified, startModelScopeLogin } from '@/utils/oauth'
 
 const route = useRoute()
 const router = useRouter()
@@ -85,8 +85,6 @@ const nickname = ref('')
 const devLoading = ref(false)
 /** 已在弹窗里发起魔搭授权，等待回调页通知 */
 const oauthPending = ref(false)
-
-const avatarText = computed(() => (auth.user?.nickname || '众').slice(0, 1))
 
 function redirectTarget() {
   const raw = typeof route.query.redirect === 'string' ? route.query.redirect : ''
@@ -98,67 +96,16 @@ function goHome() {
   router.replace(redirectTarget())
 }
 
-/**
- * 登录成功后整页跳转而不是 SPA 路由跳转：
- * 保证 farm / chat / weather 等 store 全部按新用户重新初始化，不残留上一个账号的数据。
- */
-function enterAsUser() {
-  window.location.assign(redirectTarget())
-}
-
-/** 创空间页面运行在 iframe 里，授权必须在新窗口完成，否则 state cookie 会被浏览器丢弃 */
-function openModelScopeLogin() {
-  const url = '/api/auth/modelscope'
-  // 独立标签页访问（studio 域名直连）时不需要弹窗，直接走整页跳转
-  if (window.self === window.top) {
-    window.location.href = url
-    return
-  }
-  let win = null
-  try {
-    win = window.open(url, 'agri_modelscope_login', 'width=520,height=680')
-  } catch (err) {
-    win = null
-  }
-  if (!win) {
-    // 弹窗被拦截：退化为当前窗口跳转，回调页结束时会自行进入工作台
-    window.location.href = url
-    return
-  }
-  oauthPending.value = true
-}
-
-function onAuthMessage(e) {
-  if (e.origin !== window.location.origin) return
-  const data = e.data
-  if (data && data.type === 'agri:auth' && data.ok) finishLogin()
-}
-
-function onAuthStorage(e) {
-  if (e.key === 'agri:auth') finishLogin()
-}
-
-let finishing = false
-async function finishLogin() {
-  if (finishing) return
-  finishing = true
-  await auth.fetchMe()
-  finishing = false
-  if (auth.user) enterAsUser()
-  else oauthPending.value = false
+/** 创空间页面运行在 iframe 里，授权必须在新窗口完成（见 utils/oauth.js） */
+function openLogin(switchAccount) {
+  const { popup } = startModelScopeLogin({ switchAccount, next: redirectTarget() })
+  oauthPending.value = popup
 }
 
 onMounted(async () => {
-  window.addEventListener('message', onAuthMessage)
-  window.addEventListener('storage', onAuthStorage)
   if (!auth.checked) await auth.fetchMe()
-  // 已登录直接进工作台
-  if (auth.user && route.query.err !== 'oauth_failed') goHome()
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('message', onAuthMessage)
-  window.removeEventListener('storage', onAuthStorage)
+  // 无需每次核验（本地开发）或本次加载刚核验过：已登录直接进工作台
+  if (auth.user && (!auth.verifyRequired || auth.verified)) goHome()
 })
 
 async function onDevLogin() {
@@ -170,18 +117,15 @@ async function onDevLogin() {
   devLoading.value = true
   try {
     await auth.devLogin(name)
+    markEntryVerified()
     ElMessage.success('登录成功')
-    enterAsUser()
+    // 整页跳转而不是 SPA 路由跳转：保证各 store 都按新账号重新初始化
+    window.location.assign(redirectTarget())
   } catch (err) {
     ElMessage.error(err?.message || '演示登录失败')
   } finally {
     devLoading.value = false
   }
-}
-
-async function onLogout() {
-  await auth.logout()
-  ElMessage.success('已退出登录')
 }
 </script>
 
@@ -262,6 +206,14 @@ html.dark .login-brand__mark {
   color: var(--brand-500);
 }
 
+.login-sub {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+
 .login-divider {
   display: flex;
   align-items: center;
@@ -295,23 +247,8 @@ html.dark .login-brand__mark {
   line-height: 1.5;
 }
 
-.login-user {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md, 12px);
-  margin-bottom: 16px;
-}
-
-.login-user__name {
+.login-tip strong {
+  color: var(--text-secondary);
   font-weight: 600;
-  color: var(--text-title);
-}
-
-.login-user__sub {
-  font-size: 12px;
-  color: var(--text-disabled);
 }
 </style>

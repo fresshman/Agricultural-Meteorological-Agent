@@ -55,8 +55,13 @@ class Settings(BaseSettings):
     OPENID_PROVIDER_URL: str = os.getenv("OPENID_PROVIDER_URL", "https://www.modelscope.cn")
     # 魔搭创空间域名（用于拼 redirect_uri，如 your-studio.modelscope.cn）
     STUDIO_HOST: str = os.getenv("STUDIO_HOST", "")
-    # 演示登录（无需 OAuth 即可跑通），生产建议设为 false
-    DEV_LOGIN_ENABLED: bool = os.getenv("DEV_LOGIN_ENABLED", "true").lower() == "true"
+    # 每次打开（整页加载）都向魔搭重新核验一次身份：
+    # 本地浏览器里可能残留上一个账号的 30 天会话，不核验就会"换号后还是老账号"。
+    SSO_VERIFY_ON_ENTRY: bool = os.getenv("SSO_VERIFY_ON_ENTRY", "true").lower() == "true"
+    # 演示登录（无需 OAuth 即可跑通）：创空间里默认关闭，避免多人共用一个演示账号、数据串在一起
+    DEV_LOGIN_ENABLED: bool = (
+        os.getenv("DEV_LOGIN_ENABLED", "false" if os.getenv("STUDIO_HOST") else "true").lower() == "true"
+    )
     # Cookie 是否 secure（Studio HTTPS 下强制 true；本地 http 必须 false）
     COOKIE_SECURE: bool = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 

@@ -200,6 +200,15 @@ docker-compose up --build
 
 ---
 
+## 账户与数据隔离
+
+- **登录**：魔搭 OIDC 授权码流程（`/api/auth/modelscope` → `/auth/callback`），身份取 `userinfo.sub`，一个魔搭账号对应一个稳定的 `user_id`。
+- **每次打开都强制登录**：浏览器可能残留上一个账号的 30 天会话 Cookie，所以每次整页加载都要重新用魔搭账号登录一次，以魔搭当前登录账号为准；换号后进入的就是新账号，不会沿用旧账号数据。魔搭登录页不能在 iframe 内打开，因此创空间里由登录页的按钮在新窗口完成授权，回调后自动返回原页面。
+- **数据落盘**：`data/users/{user_id}/agri_weather.db`，用户之间磁盘级隔离；`data/auth.db` 只存 users / sessions / 一次性交换令牌。
+- **开关**：`SSO_VERIFY_ON_ENTRY=false` 退回「30 天免登录」的旧行为；演示登录在注入 `STUDIO_HOST` 的创空间里默认关闭，本地可显式设 `DEV_LOGIN_ENABLED=true`。
+
+---
+
 ## 设计系统要点
 
 - **主色（耕作绿）**：`--brand-500: #2E8B5B`，配 50–900 色阶；Element Plus 主色已桥接为该绿。
