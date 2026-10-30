@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="description" content="农业气象智能体 · 面向农户与农技人员的气象问答、灾害预警、农事适宜度决策助手" />
+  <meta name="theme-color" content="#F6F8F7" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0E1A14" media="(prefers-color-scheme: dark)" />
+  <title>农业气象智能体 · AgriMet Agent</title>
+  <script>
+    /**
+     * 防主题闪烁：在 CSS / JS 加载前先给 <html> 打上 dark 类。
+     * 与 utils/storage.js 的 KEYS.THEME / stores/theme.js 的取值口径保持一致。
+     */
+    (function () {
+      try {
+        var raw = localStorage.getItem('agri:theme')
+        var mode = raw ? (JSON.parse(raw) || {}).mode : 'auto'
+        if (mode !== 'light' && mode !== 'dark') mode = 'auto'
+        var dark = mode === 'dark' || (mode === 'auto' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        if (dark) document.documentElement.classList.add('dark')
+      } catch (e) {
+        /* localStorage 不可用（隐私模式）时静默降级为浅色 */
+      }
+    })()
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

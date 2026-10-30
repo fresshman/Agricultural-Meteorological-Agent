@@ -1,0 +1,6 @@
+# 构建期占位文件（请勿删除）
+# 作用：保证 data/ 目录在进入 Docker 构建上下文时非空，
+#       否则 .gitignore 的 data/*.db 与 .dockerignore 的 *.db 排除掉
+#       agri_weather.db 后，data/ 仅剩 0 字节的 .gitkeep（点文件可能被上传流程剥离），
+#       会导致 Dockerfile 第 32 行 `COPY data/ /app/data/` 报 "/data: not found"。
+# 运行时 agri_weather.db 由后端在 /app/data 下生成，本文件可安全保留。

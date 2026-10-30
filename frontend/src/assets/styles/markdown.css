@@ -1,0 +1,240 @@
+/* ==========================================================================
+   Markdown 渲染样式（配合 MarkdownRenderer.vue 使用）
+   覆盖：标题层级 / 段落 / 列表 / 引用 / 表格（边框 + 斑马纹 + 横向滚动）/
+         行内与块级代码 / 链接 / 分隔线 / 图片
+   ========================================================================== */
+
+.markdown-body {
+  font-size: var(--fs-body-lg);
+  line-height: var(--lh-body-lg);
+  color: var(--text-body);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.markdown-body > *:first-child {
+  margin-top: 0;
+}
+
+.markdown-body > *:last-child {
+  margin-bottom: 0;
+}
+
+/* ---- 标题 ---- */
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  color: var(--text-title);
+  font-weight: 600;
+  line-height: 1.4;
+  margin: var(--sp-5) 0 var(--sp-3);
+}
+
+.markdown-body h1 {
+  font-size: var(--fs-h1);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.markdown-body h2 {
+  font-size: var(--fs-h2);
+  padding-bottom: var(--sp-1);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.markdown-body h3 {
+  font-size: var(--fs-h3);
+}
+
+.markdown-body h4 {
+  font-size: var(--fs-h4);
+}
+
+.markdown-body h5,
+.markdown-body h6 {
+  font-size: var(--fs-body-lg);
+  color: var(--text-secondary);
+}
+
+/* ---- 段落与强调 ---- */
+.markdown-body p {
+  margin: var(--sp-3) 0;
+}
+
+.markdown-body strong {
+  font-weight: 600;
+  color: var(--text-title);
+}
+
+.markdown-body em {
+  font-style: italic;
+}
+
+.markdown-body del {
+  color: var(--text-disabled);
+}
+
+.markdown-body hr {
+  height: 1px;
+  border: 0;
+  background: var(--border-light);
+  margin: var(--sp-5) 0;
+}
+
+/* ---- 列表 ---- */
+.markdown-body ul,
+.markdown-body ol {
+  margin: var(--sp-3) 0;
+  padding-left: 1.4em;
+}
+
+.markdown-body li {
+  margin: var(--sp-1) 0;
+}
+
+.markdown-body li > ul,
+.markdown-body li > ol {
+  margin: var(--sp-1) 0;
+}
+
+.markdown-body li::marker {
+  color: var(--brand-500);
+}
+
+/* 任务列表 */
+.markdown-body input[type='checkbox'] {
+  margin-right: var(--sp-1);
+}
+
+/* ---- 引用 ---- */
+.markdown-body blockquote {
+  margin: var(--sp-4) 0;
+  padding: var(--sp-3) var(--sp-4);
+  border-left: 3px solid var(--brand-500);
+  background: var(--brand-50);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  color: var(--text-secondary);
+}
+
+.markdown-body blockquote p {
+  margin: 0;
+}
+
+/* ---- 代码 ---- */
+.markdown-body code {
+  font-family: var(--font-num);
+  font-size: 0.9em;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-light);
+  color: var(--brand-700);
+}
+
+html.dark .markdown-body code {
+  color: var(--brand-300);
+}
+
+.markdown-body pre {
+  margin: var(--sp-4) 0;
+  padding: var(--sp-4);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  position: relative;
+}
+
+.markdown-body pre code {
+  display: block;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: var(--text-body);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  white-space: pre;
+}
+
+/* ---- 链接 ---- */
+.markdown-body a {
+  color: var(--brand-600);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--brand-200);
+}
+
+.markdown-body a:hover {
+  color: var(--brand-500);
+  text-decoration-color: var(--brand-500);
+}
+
+/* ---- 图片 ---- */
+.markdown-body img {
+  max-width: 100%;
+  border-radius: var(--radius-md);
+  margin: var(--sp-3) 0;
+}
+
+/* ---- 表格：带边框 + 斑马纹 + 小屏横向滚动 ---- */
+.markdown-body .table-scroll {
+  margin: var(--sp-4) 0;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  max-width: 100%;
+}
+
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-body);
+  min-width: 420px;
+  background: var(--bg-card);
+}
+
+.markdown-body thead th {
+  background: var(--bg-subtle);
+  color: var(--text-title);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.markdown-body th,
+.markdown-body td {
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border-light);
+  border-right: 1px solid var(--border-light);
+  vertical-align: top;
+}
+
+.markdown-body th:last-child,
+.markdown-body td:last-child {
+  border-right: 0;
+}
+
+.markdown-body tbody tr:nth-child(even) {
+  background: var(--bg-subtle);
+}
+
+.markdown-body tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.markdown-body tbody tr:hover {
+  background: var(--brand-50);
+}
+
+html.dark .markdown-body tbody tr:hover {
+  background: var(--bg-subtle);
+}
+
+/* ---- 流式输出时的纯文本占位（避免半截 Markdown 抖动） ---- */
+.markdown-body--plain {
+  white-space: pre-wrap;
+  font-size: var(--fs-body-lg);
+  line-height: var(--lh-body-lg);
+}

@@ -1,0 +1,36 @@
+# 环境变量（含密钥，禁止提交）
+.env
+
+# 运行时生成（仅忽略数据库文件本身；必须保留 data/ 目录与占位文件，
+# 否则上传时 data/ 因空目录/点文件被剥离，Dockerfile 的 COPY data/ 会因目录不存在构建失败）
+data/*.db
+# 每用户子库（登录后 data/users/{user_id}/agri_weather.db，运行时生成，勿上传）
+data/users/
+# 保底：显式保留 data/ 下的非点文件占位，防止 data/ 被当成空目录排除
+!data/placeholder.txt
+src/data/jieba.cache
+jieba.cache
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+logs/
+.pytest_cache/
+
+# 前端
+node_modules/
+frontend/dist/
+frontend/.build-check/
+frontend/vite.config.js.timestamp-*.mjs
+frontend/vitest.config.js.timestamp-*.mjs
+frontend/.tmp/
+frontend/*.log
+
+# IDE
+.idea/
+.vscode/
+
+# 系统
+.DS_Store
+Thumbs.db
