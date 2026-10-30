@@ -1,11 +1,16 @@
 # 农业气象智能体 · AgriMet Agent
 
+[![ModelScope](https://img.shields.io/badge/ModelScope-在线体验-6C4BF6)](https://www.modelscope.cn/studios/ennmmmmm/Agricultural-Meteorological-Agent)
 [![Vue](https://img.shields.io/badge/Vue-3.4-42b883)](https://vuejs.org)
 [![Element Plus](https://img.shields.io/badge/Element%20Plus-2.6-409eff)](https://element-plus.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110-009688)](https://fastapi.tiangolo.com)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
 **看天种地，有问必答** — 一个结合气象数据与农业知识的智能农事决策助手。前端为产品级 SPA（设计系统 + 深色模式 + 响应式），后端为 FastAPI 提供 REST / SSE 能力。
+
+> **在线体验（魔搭创空间）**：https://www.modelscope.cn/studios/ennmmmmm/Agricultural-Meteorological-Agent
+>
+> 使用魔搭账号登录后，对话、地块与农事记录会保存到你的账户目录下。
 
 > 创空间部署：**单容器 Docker，监听 `7860` 端口**（nginx 静态托管前端 + 反代后端 uvicorn）。
 
@@ -205,6 +210,8 @@ docker-compose up --build
 ---
 
 ## 部署到 ModelScope 创空间
+
+线上地址：https://www.modelscope.cn/studios/ennmmmmm/Agricultural-Meteorological-Agent
 
 1. 将 `modelscope_space/` 内容上传至魔搭创空间仓库。
 2. 创空间类型选择 **Docker**。
