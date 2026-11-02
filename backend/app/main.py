@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """FastAPI 入口：农业气象智能体后端"""
 import logging
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -16,9 +17,19 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 logger = logging.getLogger("agri-backend")
 
 
+def _warm_up_agent() -> None:
+    """后台预热智能体：要下载/加载 Embedding 模型，可能耗时几分钟，不能放在启动路径上。"""
+    try:
+        agent = get_agent()
+        logger.info(f"✅ 智能体初始化成功 | RAG={'启用' if agent.rag_engine and agent.rag_engine.vector_db else '未启用'}")
+    except Exception as e:
+        logger.error(f"❌ 智能体初始化失败: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动时预初始化单例（失败不阻断启动，路由里会兜底）
+    # 启动路径只做「不会失败、且很快」的事：
+    # 创空间会探测端口，任何一步阻塞或抛异常都会让整个容器被判定为启动失败。
     s = get_settings()
     logger.info("=" * 60)
     logger.info("🌾 农业气象智能体 FastAPI 后端启动中...")
@@ -32,16 +43,18 @@ async def lifespan(app: FastAPI):
     logger.info(f"Embedding 模型: {s.EMBEDDING_MODEL}")
     logger.info(f"LLM API Key: {'✅' if s.LLM_API_KEY else '❌ 未配置'}")
     logger.info(f"气象 API Key: {'✅' if s.WEATHER_API_KEY else '❌ 未配置'}")
-    logger.info(f"高德 API Key: {'✅' if get_amap() else '❌ 未配置'}")
 
     try:
-        agent = get_agent()
-        logger.info(f"✅ 智能体初始化成功 | RAG={'启用' if agent.rag_engine and agent.rag_engine.vector_db else '未启用'}")
+        logger.info(f"高德 API Key: {'✅' if get_amap() else '❌ 未配置'}")
     except Exception as e:
-        logger.error(f"❌ 智能体初始化失败: {e}")
+        logger.error(f"❌ 高德客户端初始化失败: {e}")
 
-    wp = get_weather_processor()
-    logger.info(f"气象处理器: {'✅' if wp else '⚠️ 未启用'}")
+    try:
+        logger.info(f"气象处理器: {'✅' if get_weather_processor() else '⚠️ 未启用'}")
+    except Exception as e:
+        logger.error(f"❌ 气象处理器初始化失败: {e}")
+
+    threading.Thread(target=_warm_up_agent, name="agent-warmup", daemon=True).start()
     logger.info("=" * 60)
     yield
     logger.info("后端关闭")

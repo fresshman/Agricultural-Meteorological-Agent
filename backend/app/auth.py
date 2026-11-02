@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
-"""魔搭（ModelScope）OIDC 账户授权核心：session cookie + 用户会话管理。
+"""账户体系核心：昵称+密码登录，session cookie + 用户会话管理。
 
-借鉴 ZhihuPath 项目的魔搭授权模式：
-- 用 authlib 注册 modelscope OIDC（server_metadata_url 自动发现端点，scope=openid profile）
-- 用户写入 users 表；会话用随机 UUID 写入 sessions 表 + HttpOnly Cookie（30 天）
-- 因魔搭创空间跨站重定向会让浏览器拒绝 cookie，回调用「一次性 exchange token + 同源 fetch 种 cookie」绕开
+- 默认登录方式是本空间的昵称+密码（provider='local'），账号存在 data/auth.db；
+- users / sessions / exchange_tokens 三张表，会话用随机 UUID 写入 + HttpOnly Cookie（30 天）；
+- 魔搭 OIDC 那条链路（provider='modelscope'）保留：/api/auth/modelscope → /auth/callback，
+  回调用「一次性 exchange token + 同源 fetch 种 cookie」绕开跨站重定向丢 cookie，前端暂不暴露入口。
 """
 import hashlib
+import hmac
+import logging
+import os
 import sqlite3
 import sys
 import time
@@ -23,6 +26,8 @@ if str(_MODELSCOPE_ROOT) not in sys.path:
     sys.path.insert(0, str(_MODELSCOPE_ROOT))
 
 from config.settings import settings, DATA_ROOT
+
+logger = logging.getLogger("agri-backend.auth")
 
 COOKIE_NAME = "agri_session"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 天
@@ -62,7 +67,21 @@ def _init_auth_db() -> None:
             );
             """
         )
+        # 老库补列：密码登录是新加的，已有的 users 表没有 password_hash
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+        if "password_hash" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
         conn.commit()
+        # 同一 provider 下 ext_id 唯一，避免并发注册出现同名账号；
+        # 老库里若已有重复行会建索引失败，跳过即可（不影响登录）
+        try:
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_provider_ext "
+                "ON users(provider, ext_id) WHERE ext_id IS NOT NULL"
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            logger.warning("users 表存在重复的 provider+ext_id，跳过唯一索引创建")
     finally:
         conn.close()
 
@@ -175,8 +194,67 @@ def upsert_modelscope_user(ext_id: str, nickname: str, avatar: str | None = None
     return _upsert_user("modelscope", ext_id, nickname, avatar)
 
 
-def upsert_dev_user(nickname: str) -> str:
-    return _upsert_user("dev", nickname, nickname)
+# ---------- 昵称 + 密码 ----------
+_PBKDF2_ROUNDS = 200_000
+
+
+def hash_password(password: str) -> str:
+    """pbkdf2-sha256 + 随机盐，不引入额外依赖；格式 pbkdf2_sha256$轮数$盐$摘要。"""
+    salt = os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _PBKDF2_ROUNDS)
+    return f"pbkdf2_sha256${_PBKDF2_ROUNDS}${salt.hex()}${digest.hex()}"
+
+
+def verify_password(stored: str | None, password: str) -> bool:
+    if not stored or not password:
+        return False
+    try:
+        algo, rounds, salt_hex, digest_hex = stored.split("$")
+        if algo != "pbkdf2_sha256":
+            return False
+        digest = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(rounds)
+        )
+    except (ValueError, TypeError):
+        return False
+    return hmac.compare_digest(digest.hex(), digest_hex)
+
+
+def create_local_user(nickname: str, password: str) -> str | None:
+    """注册昵称+密码账号；昵称已被占用时返回 None。"""
+    conn = _conn()
+    try:
+        if conn.execute(
+            "SELECT 1 FROM users WHERE provider='local' AND ext_id=?", (nickname,)
+        ).fetchone():
+            return None
+        user_id = str(uuid.uuid4())
+        conn.execute(
+            """INSERT INTO users(id, nickname, provider, ext_id, avatar, created_at, password_hash)
+               VALUES (?,?,?,?,?,?,?)""",
+            (user_id, nickname, "local", nickname, None, now_ms(), hash_password(password)),
+        )
+        conn.commit()
+        return user_id
+    except sqlite3.IntegrityError:
+        return None
+    finally:
+        conn.close()
+
+
+def authenticate_local(nickname: str, password: str) -> str | None:
+    """校验昵称+密码；账号不存在或密码不对统一返回 None。"""
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT id, password_hash FROM users WHERE provider='local' AND ext_id=?",
+            (nickname,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None or not verify_password(row["password_hash"], password):
+        return None
+    return row["id"]
 
 
 def logout(request: Request, response: Response) -> None:

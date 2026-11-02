@@ -21,13 +21,12 @@ import { useRoute } from 'vue-router'
 import AppHeader from '@/components/AppHeader.vue'
 import AppNavDrawer from '@/components/AppNavDrawer.vue'
 import AppTabBar from '@/components/AppTabBar.vue'
-import { useLocationStore } from '@/stores/location'
 import { useAuthStore } from '@/stores/auth'
-import { markEntryVerified } from '@/utils/oauth'
+import { useLocationStore } from '@/stores/location'
 
 const route = useRoute()
-const location = useLocationStore()
 const auth = useAuthStore()
+const location = useLocationStore()
 
 /** 当前视口宽度，驱动顶栏/导航的形态切换 */
 const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth)
@@ -41,45 +40,15 @@ function onResize() {
   if (window.innerWidth >= 992) menuOpen.value = false
 }
 
-/**
- * 授权回调页（新窗口）通过 postMessage / localStorage 通知登录完成。
- * 放在应用外壳里而不是登录页：切换账号时用户可能停在任何页面。
- * 刷新整页，保证各 store 都按新账号重新初始化。
- */
-let authSyncing = false
-async function syncAuth() {
-  if (authSyncing) return
-  authSyncing = true
-  await auth.fetchMe()
-  if (auth.user) {
-    // 刚完成一次授权核验，给刷新后的页面留一次性通行证，避免又被拦到登录页
-    markEntryVerified()
-    window.location.reload()
-    return
-  }
-  authSyncing = false
-}
-
-function onAuthMessage(e) {
-  if (e.origin !== window.location.origin) return
-  if (e.data && e.data.type === 'agri:auth' && e.data.ok) syncAuth()
-}
-
-function onAuthStorage(e) {
-  if (e.key === 'agri:auth') syncAuth()
-}
-
 onMounted(async () => {
   window.addEventListener('resize', onResize)
-  window.addEventListener('message', onAuthMessage)
-  window.addEventListener('storage', onAuthStorage)
+  // 位置存在账号分桶里，必须先确定身份再恢复，否则会读到未分桶的旧数据
+  await auth.fetchMe()
   if (!location.provinces.length) await location.init()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
-  window.removeEventListener('message', onAuthMessage)
-  window.removeEventListener('storage', onAuthStorage)
 })
 
 // 路由切换后关闭移动抽屉

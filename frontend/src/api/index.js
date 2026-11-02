@@ -142,12 +142,14 @@ export const healthApi = {
   check: () => http.get('/health')
 }
 
-/** 账户授权相关接口 */
+/** 账户相关接口 */
 export const authApi = {
   /** 获取当前登录用户；未登录返回 { user: null } */
   me: () => http.get('/auth/me'),
-  /** 演示登录（无 OAuth 时本地跑通） */
-  devLogin: (nickname) => http.post('/auth/dev', { nickname }),
+  /** 昵称+密码登录（成功后由后端种 HttpOnly Cookie） */
+  login: (nickname, password) => http.post('/auth/login', { nickname, password }),
+  /** 注册并登录；昵称重复返回 409 */
+  register: (nickname, password) => http.post('/auth/register', { nickname, password }),
   /** 退出登录 */
   logout: () => http.post('/auth/logout')
 }

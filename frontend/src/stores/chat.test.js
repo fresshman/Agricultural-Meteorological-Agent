@@ -9,7 +9,7 @@ vi.mock('@/api', () => ({
     submitFeedback: vi.fn(),
     feedbackStats: vi.fn()
   },
-  authApi: { me: vi.fn(), devLogin: vi.fn(), logout: vi.fn() },
+  authApi: { me: vi.fn(), login: vi.fn(), register: vi.fn(), logout: vi.fn() },
   locationApi: { coordinates: vi.fn(), provinces: vi.fn(), cities: vi.fn(), districts: vi.fn() }
 }))
 

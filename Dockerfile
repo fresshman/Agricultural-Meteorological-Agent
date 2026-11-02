@@ -11,16 +11,22 @@ RUN npm run build
 FROM python:3.10-slim
 WORKDIR /app
 
+# 不缓冲标准输出：模型初始化过程中的 print 能实时出现在创空间运行日志里，出问题才看得见
+ENV PYTHONUNBUFFERED=1
+
 # 系统依赖：nginx（反代 + 静态托管）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nginx \
     && rm -rf /var/lib/apt/lists/*
 
-    # Python 依赖（预编译 wheel，无需 build-essential）
-    COPY backend/requirements.txt /app/backend/requirements.txt
-    # 国内/ModelScope 构建环境直连 files.pythonhosted.org 经常超时，改用清华 PyPI 镜像并加大超时与重试
-    ENV PIP_DEFAULT_TIMEOUT=120
-    RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple --timeout 120 --retries 10 -r /app/backend/requirements.txt
+# Python 依赖（预编译 wheel，无需 build-essential）
+COPY backend/requirements.txt /app/backend/requirements.txt
+ENV PIP_DEFAULT_TIMEOUT=120
+# 创空间的构建机在香港：清华镜像会拒掉境外 IP，pip 只报 "from versions: none"，
+# 看着像包不存在其实是源不可用。按 阿里云 → 清华 → 官方 PyPI 依次回退。
+RUN pip install --no-cache-dir --timeout 120 --retries 5 -i https://mirrors.aliyun.com/pypi/simple/ -r /app/backend/requirements.txt \
+    || pip install --no-cache-dir --timeout 120 --retries 5 -i https://pypi.tuna.tsinghua.edu.cn/simple/ -r /app/backend/requirements.txt \
+    || pip install --no-cache-dir --timeout 120 --retries 5 -r /app/backend/requirements.txt
 
 # 前端构建产物
 COPY --from=frontend-builder /build/dist /app/frontend/dist
@@ -42,8 +48,10 @@ COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
 RUN rm -f /etc/nginx/sites-enabled/default
 
 # 启动脚本（同时运行 uvicorn + nginx）
+# 顺手去掉 CRLF：Windows 上传的文件若带 \r，首行会变成 "#!/bin/bash\r"，
+# 容器里只会报 "/app/start.sh: not found"（exit 127），排查起来很费时间
 COPY start.sh /app/start.sh
-RUN chmod +x /app/start.sh
+RUN sed -i 's/\r$//' /app/start.sh && chmod +x /app/start.sh
 
 EXPOSE 7860
 

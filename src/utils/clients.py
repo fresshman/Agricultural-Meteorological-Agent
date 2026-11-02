@@ -17,7 +17,14 @@ import threading
 import numpy as np
 from typing import List, Dict, Iterator, AsyncIterator
 from openai import OpenAI
-import torch
+
+
+def _torch():
+    """延迟导入 torch：体积大、导入慢，且 wheel 与运行环境不匹配时可能导入失败。
+    只在需要探测设备时才加载，别让它在服务启动路径上把进程拖死。"""
+    import torch
+
+    return torch
 
 
 class LLMClient:
@@ -224,7 +231,10 @@ class EmbeddingClient:
     }
 
     def __init__(self, model: str = "Qwen3-Embedding", use_fp16: bool = True):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        try:
+            self.device = "cuda" if _torch().cuda.is_available() else "cpu"
+        except Exception:
+            self.device = "cpu"
         self.use_fp16 = use_fp16 and (self.device == "cuda")
 
         if model in self.MODELS:
@@ -329,7 +339,7 @@ class EmbeddingClient:
             if "out of memory" in str(e).lower():
                 print(f"  ⚠️ GPU显存不足，自动降级为逐条处理...")
                 if self.device == "cuda":
-                    torch.cuda.empty_cache()
+                    _torch().cuda.empty_cache()
                 embeddings = self.model.encode(
                     texts,
                     batch_size=1,

@@ -179,8 +179,6 @@ async function onCommand(command, session) {
     }
   }
 }
-
-defineExpose({ formatTime })
 </script>
 
 <style scoped>

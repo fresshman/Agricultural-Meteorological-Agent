@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { chatApi } from '@/api'
 import { useLocationStore } from './location'
 import { useAuthStore } from './auth'
-import { KEYS, readJSON, readLegacySessionId, writeJSON } from '@/utils/storage'
+import { KEYS, readJSON, writeJSON } from '@/utils/storage'
 import { makeId } from '@/utils/format'
 
 /** 单会话消息上限，超出后淘汰最旧的消息（会话本身保留） */
@@ -135,7 +135,7 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
-  /** 从 localStorage 恢复；处理旧版 `agri_session_id` 的一次性迁移（幂等，仅执行一次） */
+  /** 从当前账号的分桶恢复会话 */
   function hydrate() {
     if (_hydrated) return
     _hydrated = true
@@ -151,17 +151,6 @@ export const useChatStore = defineStore('chat', () => {
       currentSessionId.value = saved.currentId || sessions.value[0]?.id || null
       if (!sessions.value.some((s) => s.id === currentSessionId.value)) {
         currentSessionId.value = sessions.value[0]?.id || null
-      }
-    }
-
-    // 旧版本裸 session id 迁移为一个「历史会话」，旧 key 保留不动
-    if (!sessions.value.length) {
-      const legacyId = readLegacySessionId()
-      if (legacyId) {
-        const legacy = createSession('历史会话', legacyId)
-        sessions.value = [legacy]
-        currentSessionId.value = legacy.id
-        persist()
       }
     }
 

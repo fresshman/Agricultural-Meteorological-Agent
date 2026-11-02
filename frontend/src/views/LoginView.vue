@@ -10,62 +10,74 @@
         </span>
         <div>
           <h1 class="login-title">农业气象智能体</h1>
-          <p class="login-slogan">
-            每次打开都用你的魔搭账号登录一次；问答、地块与农事记录只保存在你自己的账号下
-          </p>
+          <p class="login-slogan">用一个昵称当账号，问答、地块与农事记录只存在这个账号下</p>
         </div>
+      </div>
+
+      <div class="login-modes" role="tablist" aria-label="登录或注册">
+        <button
+          v-for="tab in TABS"
+          :key="tab.value"
+          type="button"
+          role="tab"
+          class="login-mode"
+          :class="{ 'is-active': mode === tab.value }"
+          :aria-selected="mode === tab.value"
+          @click="switchMode(tab.value)"
+        >
+          {{ tab.label }}
+        </button>
       </div>
 
       <el-alert
-        v-if="route.query.err === 'oauth_failed'"
+        v-if="errorMsg"
         type="error"
         :closable="false"
         show-icon
-        title="魔搭授权失败"
-        description="请重试；若反复失败，可点「切换魔搭账号」重新授权。"
+        :title="errorMsg"
         class="login-alert"
       />
 
-      <el-button
-        type="primary"
-        class="login-btn"
+      <el-input
+        v-model="nickname"
+        class="login-field"
         size="large"
-        :loading="oauthPending"
-        @click="openLogin(false)"
-      >
-        <svg class="login-btn__logo" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-          <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.3 6.9 3.8L12 11.9 5.1 8.1 12 4.3ZM5 9.9l6 3.3v6.6l-6-3.3V9.9Zm8 9.9v-6.6l6-3.3v6.6l-6 3.3Z" fill="currentColor" />
-        </svg>
-        使用魔搭（ModelScope）账号登录
+        placeholder="昵称（2–20 个字符）"
+        maxlength="20"
+        autocomplete="username"
+        @keyup.enter="onSubmit"
+      />
+      <el-input
+        v-model="password"
+        class="login-field"
+        size="large"
+        type="password"
+        show-password
+        placeholder="密码（6–64 位）"
+        maxlength="64"
+        :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
+        @keyup.enter="onSubmit"
+      />
+      <el-input
+        v-if="mode === 'register'"
+        v-model="password2"
+        class="login-field"
+        size="large"
+        type="password"
+        show-password
+        placeholder="再输一次密码"
+        maxlength="64"
+        autocomplete="new-password"
+        @keyup.enter="onSubmit"
+      />
+
+      <el-button type="primary" size="large" class="login-btn" :loading="submitting" @click="onSubmit">
+        {{ mode === 'login' ? '登录' : '注册并登录' }}
       </el-button>
 
-      <p v-if="oauthPending" class="login-tip login-tip--pending">
-        已在新窗口打开魔搭授权页，完成授权后本页会自动进入工作台。
-      </p>
-
-      <div class="login-sub">
-        <el-button link type="primary" @click="openLogin(true)">切换魔搭账号</el-button>
-      </div>
-
       <p class="login-tip">
-        登录以<strong>你浏览器当前登录的魔搭账号</strong>为准；刚换过账号的话，请点「切换魔搭账号」。
+        忘记密码只能换个昵称重新开始；账号与数据只保存在本空间的运行目录，重新部署后会清空。
       </p>
-
-      <template v-if="auth.devEnabled">
-        <div class="login-divider"><span>或</span></div>
-
-        <div class="login-dev">
-          <el-input
-            v-model="nickname"
-            placeholder="输入昵称用于演示登录"
-            maxlength="20"
-            class="login-dev__input"
-            @keyup.enter="onDevLogin"
-          />
-          <el-button class="login-dev__btn" @click="onDevLogin" :loading="devLoading">演示登录</el-button>
-        </div>
-        <p class="login-tip">演示登录仅用于本地/未配置 OAuth 时体验，不绑定魔搭账号。</p>
-      </template>
     </div>
   </div>
 </template>
@@ -75,16 +87,22 @@ import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
-import { markEntryVerified, startModelScopeLogin } from '@/utils/oauth'
+
+const TABS = [
+  { value: 'login', label: '登录' },
+  { value: 'register', label: '注册' }
+]
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
+const mode = ref('login')
 const nickname = ref('')
-const devLoading = ref(false)
-/** 已在弹窗里发起魔搭授权，等待回调页通知 */
-const oauthPending = ref(false)
+const password = ref('')
+const password2 = ref('')
+const submitting = ref(false)
+const errorMsg = ref('')
 
 function redirectTarget() {
   const raw = typeof route.query.redirect === 'string' ? route.query.redirect : ''
@@ -92,41 +110,53 @@ function redirectTarget() {
   return raw.startsWith('/') && !raw.startsWith('//') ? raw : '/dashboard'
 }
 
-function goHome() {
-  router.replace(redirectTarget())
+function switchMode(next) {
+  if (mode.value === next) return
+  mode.value = next
+  errorMsg.value = ''
+  password.value = ''
+  password2.value = ''
 }
 
-/** 创空间页面运行在 iframe 里，授权必须在新窗口完成（见 utils/oauth.js） */
-function openLogin(switchAccount) {
-  const { popup } = startModelScopeLogin({ switchAccount, next: redirectTarget() })
-  oauthPending.value = popup
+/** 与后端保持同一套长度约束，先在本地拦掉，省一次往返 */
+function validate() {
+  const name = nickname.value.trim()
+  if (name.length < 2 || name.length > 20) return '昵称需为 2–20 个字符'
+  if (password.value.length < 6 || password.value.length > 64) return '密码需为 6–64 位'
+  if (mode.value === 'register' && password.value !== password2.value) return '两次输入的密码不一致'
+  return ''
+}
+
+async function onSubmit() {
+  if (submitting.value) return
+  const problem = validate()
+  if (problem) {
+    errorMsg.value = problem
+    return
+  }
+  errorMsg.value = ''
+  submitting.value = true
+  const name = nickname.value.trim()
+  try {
+    if (mode.value === 'register') {
+      await auth.register(name, password.value)
+      ElMessage.success('注册成功')
+    } else {
+      await auth.login(name, password.value)
+    }
+    // 整页跳转而不是 SPA 路由跳转：保证各 store 都按新账号重新初始化
+    window.location.assign(redirectTarget())
+  } catch (err) {
+    errorMsg.value = err?.message || '登录失败，请稍后重试'
+  } finally {
+    submitting.value = false
+  }
 }
 
 onMounted(async () => {
   if (!auth.checked) await auth.fetchMe()
-  // 无需每次核验（本地开发）或本次加载刚核验过：已登录直接进工作台
-  if (auth.user && (!auth.verifyRequired || auth.verified)) goHome()
+  if (auth.user) router.replace(redirectTarget())
 })
-
-async function onDevLogin() {
-  const name = nickname.value.trim()
-  if (!name) {
-    ElMessage.warning('请输入昵称')
-    return
-  }
-  devLoading.value = true
-  try {
-    await auth.devLogin(name)
-    markEntryVerified()
-    ElMessage.success('登录成功')
-    // 整页跳转而不是 SPA 路由跳转：保证各 store 都按新账号重新初始化
-    window.location.assign(redirectTarget())
-  } catch (err) {
-    ElMessage.error(err?.message || '演示登录失败')
-  } finally {
-    devLoading.value = false
-  }
-}
 </script>
 
 <style scoped>
@@ -188,67 +218,59 @@ html.dark .login-brand__mark {
   line-height: 1.5;
 }
 
-.login-alert {
+/* ---- 登录 / 注册 分段控件 ---- */
+.login-modes {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
   margin-bottom: 18px;
+  background: var(--bg-page);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+}
+
+.login-mode {
+  flex: 1;
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-body);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.login-mode:hover {
+  color: var(--text-title);
+}
+
+.login-mode.is-active {
+  background: var(--bg-card);
+  color: var(--brand-600);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.login-alert {
+  margin-bottom: 14px;
+}
+
+.login-field {
+  margin-bottom: 12px;
 }
 
 .login-btn {
   width: 100%;
-  margin-top: 8px;
-}
-
-.login-btn__logo {
-  margin-right: 6px;
-}
-
-.login-tip--pending {
-  margin-top: 10px;
-  color: var(--brand-500);
-}
-
-.login-sub {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
   margin-top: 6px;
 }
 
-.login-divider {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 18px 0;
-  color: var(--text-disabled);
-  font-size: 12px;
-}
-
-.login-divider::before,
-.login-divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--border-light);
-}
-
-.login-dev {
-  display: flex;
-  gap: 8px;
-}
-
-.login-dev__input {
-  flex: 1;
-}
-
 .login-tip {
-  margin: 12px 0 0;
+  margin: 14px 0 0;
   font-size: 12px;
   color: var(--text-disabled);
-  line-height: 1.5;
-}
-
-.login-tip strong {
-  color: var(--text-secondary);
-  font-weight: 600;
+  line-height: 1.6;
 }
 </style>

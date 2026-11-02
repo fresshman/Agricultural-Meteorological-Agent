@@ -1,5 +1,7 @@
 #!/bin/bash
 # 容器启动脚本：同时运行 uvicorn 后端和 nginx 前端
+# 注意：本文件必须保持 LF 换行。CRLF 会让首行变成 "#!/bin/bash\r"，
+# 容器里直接报 "/app/start.sh: not found"（exit 127）。
 set -e
 
 cd /app

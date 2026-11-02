@@ -5,7 +5,7 @@ import { createPinia, setActivePinia } from 'pinia'
 vi.mock('@/api', () => ({
   weatherApi: { get: vi.fn() },
   locationApi: { coordinates: vi.fn(), provinces: vi.fn(), cities: vi.fn(), districts: vi.fn() },
-  authApi: { me: vi.fn(), devLogin: vi.fn(), logout: vi.fn() },
+  authApi: { me: vi.fn(), login: vi.fn(), register: vi.fn(), logout: vi.fn() },
   chatApi: { send: vi.fn(), stream: vi.fn(), submitFeedback: vi.fn(), feedbackStats: vi.fn() }
 }))
 

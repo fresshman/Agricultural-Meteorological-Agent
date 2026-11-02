@@ -10,7 +10,7 @@
 
 > **在线体验（魔搭创空间）**：https://www.modelscope.cn/studios/ennmmmmm/Agricultural-Meteorological-Agent
 >
-> 使用魔搭账号登录后，对话、地块与农事记录会保存到你的账户目录下。
+> 用昵称 + 密码登录本空间的账号后，对话、地块与农事记录只保存在你自己的账号目录下。
 
 > 创空间部署：**单容器 Docker，监听 `7860` 端口**（nginx 静态托管前端 + 反代后端 uvicorn）。
 
@@ -202,10 +202,12 @@ docker-compose up --build
 
 ## 账户与数据隔离
 
-- **登录**：魔搭 OIDC 授权码流程（`/api/auth/modelscope` → `/auth/callback`），身份取 `userinfo.sub`，一个魔搭账号对应一个稳定的 `user_id`。
-- **每次打开都强制登录**：浏览器可能残留上一个账号的 30 天会话 Cookie，所以每次整页加载都要重新用魔搭账号登录一次，以魔搭当前登录账号为准；换号后进入的就是新账号，不会沿用旧账号数据。魔搭登录页不能在 iframe 内打开，因此创空间里由登录页的按钮在新窗口完成授权，回调后自动返回原页面。
+- **登录**：本空间自己的昵称 + 密码账号（`POST /api/auth/register` 注册即登录，`POST /api/auth/login` 登录，昵称 2–20 字符、密码 6–64 位）。密码以 pbkdf2-sha256 + 每账号随机盐存库，不存明文；会话是随机 UUID 写入 `sessions` 表 + HttpOnly Cookie（30 天）。
 - **数据落盘**：`data/users/{user_id}/agri_weather.db`，用户之间磁盘级隔离；`data/auth.db` 只存 users / sessions / 一次性交换令牌。
-- **开关**：`SSO_VERIFY_ON_ENTRY=false` 退回「30 天免登录」的旧行为；演示登录在注入 `STUDIO_HOST` 的创空间里默认关闭，本地可显式设 `DEV_LOGIN_ENABLED=true`。
+- **对话历史**：存在浏览器 `localStorage`，键名带账号后缀（`agri:sessions@{user_id}`，位置和偏好同理），同一浏览器换账号各读各的桶；主题是设备级偏好，不分桶。换浏览器或清缓存时历史不跟随账号。
+- **本地桶上限**：同一浏览器最多保留最近 12 个账号的数据（按登录时间），超限的最旧账号整桶自动清除；写入顶到浏览器配额时也会先丢最旧账号再重试。
+- **换账号**：顶栏账户菜单「退出登录」，再用另一个昵称登录即可。
+- **魔搭 OIDC 保留但不用**：后端 `/api/auth/modelscope` → `/auth/callback` 那条链路还在，前端不再提供入口；需要时配好 `OAUTH_CLIENT_ID/SECRET` 即可恢复。
 
 ---
 

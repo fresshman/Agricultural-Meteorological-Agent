@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""账户授权路由：魔搭 OIDC 登录、回调、会话交换、当前用户、登出、演示登录。"""
+"""账户路由：昵称+密码注册/登录、当前用户、登出；魔搭 OIDC（回调、会话交换）保留备用。"""
 import json
 import logging
 import re
@@ -9,24 +9,31 @@ from fastapi.responses import RedirectResponse, HTMLResponse
 from pydantic import BaseModel
 
 from ..auth import (
+    authenticate_local,
     create_exchange_token,
+    create_local_user,
     consume_exchange_token,
     create_session_for_user,
     get_session_user,
     logout,
     oauth,
-    upsert_dev_user,
     upsert_modelscope_user,
 )
 from config.settings import settings
 
 logger = logging.getLogger("agri-backend.auth")
 
-router = APIRouter(prefix="/api/auth", tags=["账户授权"])
+router = APIRouter(prefix="/api/auth", tags=["账户"])
+
+PASSWORD_MIN_LEN = 6
+PASSWORD_MAX_LEN = 64
+NICKNAME_MIN_LEN = 2
+NICKNAME_MAX_LEN = 20
 
 
-class DevLoginReq(BaseModel):
+class CredentialsReq(BaseModel):
     nickname: str = ""
+    password: str = ""
 
 
 # 只放行站内相对路径：杜绝 ?next=//evil.com 的开放重定向，也避免回到 /api、/auth 死循环
@@ -41,35 +48,47 @@ def _safe_next(raw: str | None) -> str:
     return raw
 
 
-def verify_required() -> bool:
-    """是否需要「每次打开都核验一次魔搭身份」。
-
-    没有配置 OAuth 时根本无法核验，必须放行，否则应用会被锁死在登录页。
-    """
-    return bool(
-        settings.SSO_VERIFY_ON_ENTRY and settings.OAUTH_CLIENT_ID and settings.OAUTH_CLIENT_SECRET
-    )
-
-
 @router.get("/me")
 def auth_me(request: Request):
-    """返回当前登录用户（无则返回 user:null）以及前端需要的登录策略。"""
-    return {
-        "user": get_session_user(request),
-        "verify_required": verify_required(),
-        "dev_enabled": settings.DEV_LOGIN_ENABLED,
-    }
+    """返回当前登录用户（无则返回 user:null）。"""
+    return {"user": get_session_user(request)}
 
 
-@router.post("/dev")
-def auth_dev(req: DevLoginReq, request: Request, response: Response):
-    """开发/演示登录兜底：无 OAuth 密钥时也能跑通；DEV_LOGIN_ENABLED=false 时关闭。"""
-    if not settings.DEV_LOGIN_ENABLED:
-        raise HTTPException(status_code=403, detail="演示登录已关闭，请使用魔搭账号登录")
-    name = (req.nickname or "演示用户").strip()[:20]
-    user_id = upsert_dev_user(name)
+def _check_nickname(raw: str) -> str:
+    nickname = (raw or "").strip()
+    if not NICKNAME_MIN_LEN <= len(nickname) <= NICKNAME_MAX_LEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"昵称需为 {NICKNAME_MIN_LEN}–{NICKNAME_MAX_LEN} 个字符",
+        )
+    return nickname
+
+
+@router.post("/register")
+def auth_register(req: CredentialsReq, response: Response):
+    """注册并直接登录：昵称即账号，同昵称只能有一个主人。"""
+    nickname = _check_nickname(req.nickname)
+    password = req.password or ""
+    if not PASSWORD_MIN_LEN <= len(password) <= PASSWORD_MAX_LEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"密码需为 {PASSWORD_MIN_LEN}–{PASSWORD_MAX_LEN} 位",
+        )
+    user_id = create_local_user(nickname, password)
+    if not user_id:
+        raise HTTPException(status_code=409, detail="该昵称已被注册，换个昵称或直接登录")
     create_session_for_user(response, user_id)
-    return {"ok": True, "nickname": name}
+    return {"ok": True, "nickname": nickname}
+
+
+@router.post("/login")
+def auth_login(req: CredentialsReq, response: Response):
+    """昵称+密码登录；账号不存在与密码错误返回同一提示，不透露昵称是否已注册。"""
+    user_id = authenticate_local((req.nickname or "").strip(), req.password or "")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="昵称或密码不正确")
+    create_session_for_user(response, user_id)
+    return {"ok": True}
 
 
 @router.post("/exchange")
