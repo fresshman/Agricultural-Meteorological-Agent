@@ -82,39 +82,101 @@
 
 ---
 
-## 目录结构（前端）
+## 目录结构
+
+> 下面这棵树是**部署后的仓库根**（魔搭创空间仓库、以及本项目的 Gitee 仓库根）。在开发主仓里，这些内容整体位于 `modelscope_space/` 目录下。
 
 ```
-modelscope_space/
+agricultural-meteorological-agent/
 ├── Dockerfile                 # 多阶段构建（前端 build + 后端运行）
 ├── docker-compose.yml         # 容器编排（暴露 7860）
 ├── start.sh                   # 启动脚本（nginx + uvicorn）
 ├── .env.example               # 环境变量模板
+├── LICENSE                    # Apache 2.0 许可证
+├── README.md                  # 项目说明文档
+│
 ├── backend/                   # FastAPI 后端
-│   └── app/
-│       ├── main.py            # 入口
-│       ├── routers/           # chat/weather/location/farm/warning/health
-│       └── schemas/           # 请求/响应模型
-└── frontend/                  # Vue 3 前端
-    ├── index.html             # 含防闪白/闪黑内联脚本
-    ├── package.json
-    ├── vite.config.js
-    ├── nginx.conf             # 监听 7860，proxy_buffering off（SSE）
-    └── src/
-        ├── main.js            # 注册 EP 全部图标 + 主题预初始化
-        ├── App.vue            # 应用外壳（Header / Drawer / TabBar）
-        ├── api/               # axios 封装 + 各模块 API
-        ├── assets/styles/     # main.css(Token) / theme.css(EP桥接) / markdown.css
-        ├── composables/       # useChart / useSpeech / useAutoRefresh
-        ├── router/            # 路由 + NAV_ITEMS 单一来源
-        ├── stores/            # theme/weather/location/chat/farm/warning
-        ├── utils/             # sse / markdown / risk / storage / format / suitability
-        ├── components/        # 通用组件（20+）
-        │   ├── AppHeader / AppNavDrawer / AppTabBar / ThemeToggle / LocationSelector
-        │   ├── ChatComposer / SessionList / MarkdownRenderer / AnswerMetaPanel / FeedbackBar / NowcastBanner
-        │   ├── Dashboard: MetricCard / StatPill / RiskBadge / WeatherPanel / WeatherChart / ForecastChart / PageHeader / EmptyState / SkeletonCard
-        │   └── Farm/Calendar: FieldCard / FieldDetailDrawer / SuitabilityBar / SuitabilityMatrix
-        └── views/             # DashboardView / ChatView / FarmView / WarningView / CalendarView / NotFoundView
+│   ├── app/
+│   │   ├── main.py            # 应用入口
+│   │   ├── auth.py            # 认证模块（昵称+密码登录，魔搭 OIDC 备用）
+│   │   ├── deps.py            # 依赖注入
+│   │   ├── routers/           # API 路由
+│   │   │   ├── auth.py        # 认证相关接口
+│   │   │   ├── chat.py        # 智能问答（SSE 流式）
+│   │   │   ├── weather.py     # 气象数据接口
+│   │   │   ├── location.py    # 地理编码 / 行政区划
+│   │   │   ├── farm.py        # 农场 / 地块管理
+│   │   │   ├── warning.py     # 预警分析
+│   │   │   └── health.py      # 健康检查
+│   │   └── schemas/           # Pydantic 数据模型
+│   ├── requirements.txt       # Python 依赖
+│   └── scripts/               # 迁移脚本
+│
+├── frontend/                  # Vue 3 前端
+│   ├── index.html             # 含防闪白/闪黑内联脚本
+│   ├── package.json
+│   ├── vite.config.js
+│   ├── nginx.conf             # 监听 7860，proxy_buffering off（SSE）
+│   └── src/
+│       ├── main.js            # 注册 EP 全部图标 + 主题预初始化
+│       ├── App.vue            # 应用外壳（Header / Drawer / TabBar）
+│       ├── api/               # axios 封装 + 各模块 API
+│       ├── assets/styles/     # main.css(Token) / theme.css(EP桥接) / markdown.css
+│       ├── composables/       # useChart / useSpeech / useAutoRefresh
+│       ├── router/            # 路由 + NAV_ITEMS 单一来源
+│       ├── stores/            # theme/weather/location/chat/farm/warning
+│       ├── utils/             # sse / markdown / risk / storage / format / suitability
+│       ├── components/        # 通用组件（20+）
+│       │   ├── AppHeader / AppNavDrawer / AppTabBar / ThemeToggle / LocationSelector
+│       │   ├── ChatComposer / SessionList / MarkdownRenderer / AnswerMetaPanel / FeedbackBar / NowcastBanner
+│       │   ├── Dashboard: MetricCard / StatPill / RiskBadge / WeatherPanel / WeatherChart / ForecastChart / PageHeader / EmptyState / SkeletonCard
+│       │   └── Farm/Calendar: FieldCard / FieldDetailDrawer / SuitabilityBar / SuitabilityMatrix
+│       └── views/             # DashboardView / ChatView / FarmView / WarningView / CalendarView / NotFoundView
+│
+├── src/                       # 业务核心（后端使用）
+│   ├── agents/
+│   │   ├── llm_integration.py # LLM 客户端 + RAG 引擎
+│   │   └── orchestrator.py    # 智能体编排（AgriculturalWeatherAgent）
+│   ├── core/
+│   │   ├── memory_manager.py  # 用户记忆管理
+│   │   └── rule_engine.py     # 农事规则引擎
+│   ├── data/
+│   │   ├── weather_processor.py    # 气象数据处理
+│   │   ├── vector_db.py            # FAISS 向量库
+│   │   ├── chunker.py              # 文档分块
+│   │   ├── cleaner.py              # 文本清洗
+│   │   ├── keyword_extract.py      # 关键词提取
+│   │   └── kb_builder.py           # 知识库构建
+│   ├── models/
+│   │   └── __init__.py       # Pydantic 数据模型（CropType/GrowthStage/WeatherData 等）
+│   ├── tools/
+│   │   ├── agent_tools.py         # 气象查询/生长计算/农事判断等工具
+│   │   ├── business_tools.py      # 场景模拟/收获窗口/成本风险
+│   │   ├── compliance_tools.py    # 合规分类/不确定性管理
+│   │   ├── crop_calendar_tools.py # 农事日历/播期/水肥建议
+│   │   ├── facility_tools.py      # 温室控制/设施环境
+│   │   ├── field_data_tools.py    # 地块管理/记录/传感器
+│   │   ├── interaction_tools.py   # 任务提醒/图像识别/历史回顾
+│   │   └── weather_warning_tools.py # 灾害预警/病虫害预测/适宜度
+│   ├── ui/
+│   │   └── farm_core.py      # 地块核心类（FarmField / FarmManager）
+│   └── utils/
+│       ├── amap_geocoding.py # 高德地图地理编码
+│       ├── china_regions.py  # 中国行政区划
+│       └── clients.py        # LLM/Embedding 客户端
+│
+├── config/
+│   ├── settings.py           # 应用配置
+│   └── localization.py       # 本地化
+│
+├── knowledge_bases/          # 农业知识库
+│   ├── agri_knowledge.db
+│   └── agri_knowledge.faiss
+│
+└── data/                     # 用户数据目录（运行时创建）
+    ├── users/                # 用户数据（磁盘级隔离）
+    ├── auth.db               # 认证数据
+    └── placeholder.txt
 ```
 
 ---
@@ -220,14 +282,42 @@ docker-compose up --build
 
 ---
 
+## 核心模块说明
+
+### 智能体编排（src/agents/）
+
+- **AgriculturalWeatherAgent**：核心智能体，负责理解用户查询、调度工具、整合结果
+- **RAGEngine**：基于 FAISS 的知识检索增强生成
+- **LLMClient**：ModelScope API 封装，支持同步/流式调用
+
+### 规则引擎（src/core/）
+
+- **RuleEngine**：农事决策规则库，支持播期/灌溉/施肥/收获/病虫害等判断
+- **MemoryManager**：用户画像、会话历史、地块信息持久化
+
+### 工具集（src/tools/）
+
+项目提供 **35+ 工具类**，涵盖：
+
+| 类别 | 工具 |
+|------|------|
+| 农事判断 | 播期判断、灌溉时机、施肥时机、收获时机、病虫害防治 |
+| 气象分析 | 灾害风险评估、病虫害预测、农事适宜度 |
+| 知识检索 | 农业知识向量检索、关键词提取 |
+| 设施农业 | 温室环境分析、大棚管控 |
+| 地块管理 | 地块 CRUD、农事记录、传感器数据 |
+| 智能提醒 | 任务提醒、图像识别、历史回顾 |
+
+---
+
 ## 部署到 ModelScope 创空间
 
 线上地址：https://www.modelscope.cn/studios/ennmmmmm/Agricultural-Meteorological-Agent
 
-1. 将 `modelscope_space/` 内容上传至魔搭创空间仓库。
-2. 创空间类型选择 **Docker**。
-3. 容器自动监听 **`7860` 端口**（nginx 反代 uvicorn）。
-4. 在创空间设置中配置环境变量（API Key 等）。
+1. 将项目内容上传至魔搭创空间仓库（本仓库根即创空间要上传的内容；开发主仓里对应 `modelscope_space/` 目录）
+2. 创空间类型选择 **Docker**
+3. 容器自动监听 **`7860` 端口**（nginx 反代 uvicorn）
+4. 在创空间设置中配置环境变量（API Key 等）
 
 ---
 
