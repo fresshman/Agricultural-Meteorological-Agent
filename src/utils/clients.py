@@ -64,7 +64,7 @@ class LLMClient:
         },
         "qwen3-next": {
             "base_url": "https://api-inference.modelscope.cn/v1",
-            "model": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+            "model": "Qwen/Qwen3.8-27B",
             "env_key": "LLM_API_KEY",
             "description": "开源优越"
         },

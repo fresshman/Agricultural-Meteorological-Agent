@@ -10,7 +10,7 @@
 
 > **在线体验（魔搭创空间）**：https://www.modelscope.cn/studios/ennmmmmm/Agricultural-Meteorological-Agent
 >
-> 用昵称 + 密码登录本空间的账号后，对话、地块与农事记录只保存在你自己的账号目录下。
+> 打开即用，不需要注册。对话不写浏览器存储，每次打开都是空白；定位与偏好会记在本地。
 
 > 创空间部署：**单容器 Docker，监听 `7860` 端口**（nginx 静态托管前端 + 反代后端 uvicorn）。
 
@@ -129,7 +129,7 @@ agricultural-meteorological-agent/
 │       ├── components/        # 通用组件（20+）
 │       │   ├── AppHeader / AppNavDrawer / AppTabBar / ThemeToggle / LocationSelector
 │       │   ├── ChatComposer / SessionList / MarkdownRenderer / AnswerMetaPanel / FeedbackBar / NowcastBanner
-│       │   ├── Dashboard: MetricCard / StatPill / RiskBadge / WeatherPanel / WeatherChart / ForecastChart / PageHeader / EmptyState / SkeletonCard
+│       │   ├── Dashboard: RiskBadge / WeatherChart / ForecastChart / PageHeader / EmptyState / SkeletonCard
 │       │   └── Farm/Calendar: FieldCard / FieldDetailDrawer / SuitabilityBar / SuitabilityMatrix
 │       └── views/             # DashboardView / ChatView / FarmView / WarningView / CalendarView / NotFoundView
 │
@@ -151,12 +151,7 @@ agricultural-meteorological-agent/
 │   │   └── __init__.py       # Pydantic 数据模型（CropType/GrowthStage/WeatherData 等）
 │   ├── tools/
 │   │   ├── agent_tools.py         # 气象查询/生长计算/农事判断等工具
-│   │   ├── business_tools.py      # 场景模拟/收获窗口/成本风险
 │   │   ├── compliance_tools.py    # 合规分类/不确定性管理
-│   │   ├── crop_calendar_tools.py # 农事日历/播期/水肥建议
-│   │   ├── facility_tools.py      # 温室控制/设施环境
-│   │   ├── field_data_tools.py    # 地块管理/记录/传感器
-│   │   ├── interaction_tools.py   # 任务提醒/图像识别/历史回顾
 │   │   └── weather_warning_tools.py # 灾害预警/病虫害预测/适宜度
 │   ├── ui/
 │   │   └── farm_core.py      # 地块核心类（FarmField / FarmManager）
@@ -166,8 +161,7 @@ agricultural-meteorological-agent/
 │       └── clients.py        # LLM/Embedding 客户端
 │
 ├── config/
-│   ├── settings.py           # 应用配置
-│   └── localization.py       # 本地化
+│   └── settings.py           # 应用配置
 │
 ├── knowledge_bases/          # 农业知识库
 │   ├── agri_knowledge.db
@@ -262,14 +256,22 @@ docker-compose up --build
 
 ---
 
-## 账户与数据隔离
+## 访问形态与数据边界
 
-- **登录**：本空间自己的昵称 + 密码账号（`POST /api/auth/register` 注册即登录，`POST /api/auth/login` 登录，昵称 2–20 字符、密码 6–64 位）。密码以 pbkdf2-sha256 + 每账号随机盐存库，不存明文；会话是随机 UUID 写入 `sessions` 表 + HttpOnly Cookie（30 天）。
-- **数据落盘**：`data/users/{user_id}/agri_weather.db`，用户之间磁盘级隔离；`data/auth.db` 只存 users / sessions / 一次性交换令牌。
-- **对话历史**：存在浏览器 `localStorage`，键名带账号后缀（`agri:sessions@{user_id}`，位置和偏好同理），同一浏览器换账号各读各的桶；主题是设备级偏好，不分桶。换浏览器或清缓存时历史不跟随账号。
-- **本地桶上限**：同一浏览器最多保留最近 12 个账号的数据（按登录时间），超限的最旧账号整桶自动清除；写入顶到浏览器配额时也会先丢最旧账号再重试。
-- **换账号**：顶栏账户菜单「退出登录」，再用另一个昵称登录即可。
-- **魔搭 OIDC 保留但不用**：后端 `/api/auth/modelscope` → `/auth/callback` 那条链路还在，前端不再提供入口；需要时配好 `OAUTH_CLIENT_ID/SECRET` 即可恢复。
+**当前发布形态：免登录演示。** 两个开关控制，功能代码全部保留，翻开关即回到账号形态：
+
+| 维度 | 免登录形态（现在） | 恢复登录形态 |
+|------|--------------------|--------------|
+| 入口 | 进空间即用，`/login` 被送回主界面 | `frontend/src/config/flags.js` 的 `LOGIN_REQUIRED = true` **且** 后端 `AUTH_REQUIRED=true` |
+| 身份 | 无 cookie 的请求统一归 `GUEST_USER_ID`（默认 `guest`） | 昵称 + 密码账号，HttpOnly Cookie 30 天 |
+| 对话历史 | 不落 `localStorage`，每次打开都是空白 | `PERSIST_CHAT = true`：按账号分桶 `agri:sessions@{user_id}`，同浏览器最多留最近 12 个账号 |
+| 地块数据 | 所有访客共用 `data/users/guest/agri_weather.db` | 每账号独立子库，磁盘级隔离 |
+| 定位 / 偏好 / 主题 | 照常记忆在浏览器（设备级） | 同左（位置与偏好按账号分桶） |
+
+- **登录体系（保留未接线）**：`POST /api/auth/register` 注册即登录、`POST /api/auth/login` 登录（昵称 2–20 字符、密码 6–64 位），密码 pbkdf2-sha256 + 每账号随机盐存库，不存明文；会话是随机 UUID 写入 `sessions` 表 + HttpOnly Cookie。`data/auth.db` 只存 users / sessions / 一次性交换令牌。
+- **服务端会话记忆**：按前端生成的 `session_id` 存（`conversations` 表以 `session_id` 为主键），不是按账号回捞历史，所以每次新开会话都是干净的。
+- **魔搭 OIDC 保留但不用**：后端 `/api/auth/modelscope` → `/auth/callback` 链路还在，前端不提供入口；需要时配好 `OAUTH_CLIENT_ID/SECRET` 并打开 `AUTH_REQUIRED` 即可恢复。
+- ⚠️ 免登录形态意味着**任何访客都能读写那份共享地块库**，适合演示，不适合承载真实用户数据。
 
 ---
 
@@ -297,16 +299,16 @@ docker-compose up --build
 
 ### 工具集（src/tools/）
 
-项目提供 **35+ 工具类**，涵盖：
+项目提供 **20 个工具类**（+ `ToolRegistry` 注册表），涵盖：
 
 | 类别 | 工具 |
 |------|------|
-| 农事判断 | 播期判断、灌溉时机、施肥时机、收获时机、病虫害防治 |
-| 气象分析 | 灾害风险评估、病虫害预测、农事适宜度 |
-| 知识检索 | 农业知识向量检索、关键词提取 |
-| 设施农业 | 温室环境分析、大棚管控 |
-| 地块管理 | 地块 CRUD、农事记录、传感器数据 |
-| 智能提醒 | 任务提醒、图像识别、历史回顾 |
+| 农事判断 | 农事操作判断、收获时机、生长阶段计算 |
+| 气象分析 | 灾害风险评估、灾害预警、病虫害预测、农事适宜度 |
+| 知识检索 | 农业知识向量检索、症状诊断 |
+| 作物管理 | 施肥推荐、品种推荐、轮作倒茬、蔬菜/果树/花卉管理、储藏风险 |
+| 设施农业 | 温室环境分析 |
+| 合规 | 建议分类、不确定性管理 |
 
 ---
 
