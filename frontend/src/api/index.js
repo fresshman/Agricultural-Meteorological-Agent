@@ -43,6 +43,16 @@ http.interceptors.response.use(
 /** 流式问答的 SSE 地址 */
 const STREAM_URL = '/api/chat/stream'
 
+/**
+ * 流式看门狗阈值（毫秒）。后端每 2 秒会补一帧进度，所以帧间静默只要 60 秒
+ * 就说明连接真的死了；总时长上限用来兜住「心跳一直有、答案永远不来」。
+ */
+export const STREAM_TIMEOUTS = {
+  firstFrameMs: 45000,
+  silenceMs: 60000,
+  totalMs: 180000
+}
+
 export const chatApi = {
   /** @returns {Promise<any>} 后端 ChatResponse（content / evidence / confidence / ...） */
   send: (data) => http.post('/chat', data),
@@ -61,7 +71,8 @@ export const chatApi = {
    * @returns {Promise<{ ok: boolean, aborted: boolean, reason?: string }>}
    */
   async stream(payload, opts = {}) {
-    const { signal, onEvent } = opts
+    const { signal, onEvent, timeouts } = opts
+    const limits = { ...STREAM_TIMEOUTS, ...(timeouts || {}) }
     const controller = new AbortController()
     const onAbort = () => controller.abort()
 
@@ -69,6 +80,23 @@ export const chatApi = {
       if (signal.aborted) controller.abort()
       else signal.addEventListener('abort', onAbort, { once: true })
     }
+
+    // 三档超时共用一个 controller：谁先到就把 kind 记下来再中止连接
+    let frameCount = 0
+    let timeoutKind = null
+    let silenceTimer = null
+    const trip = (kind, ms) => {
+      if (silenceTimer) clearTimeout(silenceTimer)
+      silenceTimer = setTimeout(() => {
+        if (!timeoutKind) timeoutKind = kind
+        controller.abort()
+      }, ms)
+    }
+    trip('first-frame', limits.firstFrameMs)
+    const totalTimer = setTimeout(() => {
+      if (!timeoutKind) timeoutKind = 'total'
+      controller.abort()
+    }, limits.totalMs)
 
     let reader = null
     try {
@@ -79,24 +107,39 @@ export const chatApi = {
         signal: controller.signal
       })
 
-      if (!resp.ok) throw new Error(`流式接口返回 ${resp.status}`)
+      if (!resp.ok) {
+        const err = new Error(`流式接口返回 ${resp.status}`)
+        err.status = resp.status
+        throw err
+      }
       if (!resp.body) throw new Error('当前浏览器不支持流式读取')
 
       reader = resp.body.getReader()
       const result = await readSSE(reader, (frame) => {
+        frameCount += 1
+        // 收到任何一帧（含进度心跳）就把阈值换成静默档
+        trip('idle', limits.silenceMs)
         if (typeof onEvent === 'function') onEvent(frame)
       }, { signal: controller.signal })
 
+      if (timeoutKind) {
+        return { ok: false, aborted: false, reason: `timeout:${timeoutKind}`, timeoutKind: timeoutKind }
+      }
       if (result.aborted) return { ok: false, aborted: true, reason: 'aborted' }
       if (!result.ok) return { ok: false, aborted: false, reason: result.reason || 'stream-error' }
       return { ok: true, aborted: false }
     } catch (err) {
+      if (timeoutKind) {
+        return { ok: false, aborted: false, reason: `timeout:${timeoutKind}`, timeoutKind: timeoutKind }
+      }
       if (err?.name === 'AbortError' || controller.signal.aborted || signal?.aborted) {
         // 主动中止：不上抛、不 Toast
         return { ok: false, aborted: true, reason: 'aborted' }
       }
-      return { ok: false, aborted: false, reason: err?.message || String(err) }
+      return { ok: false, aborted: false, reason: err?.message || String(err), status: err?.status || 0 }
     } finally {
+      if (silenceTimer) clearTimeout(silenceTimer)
+      clearTimeout(totalTimer)
       try {
         if (reader) await reader.cancel()
       } catch (err) {

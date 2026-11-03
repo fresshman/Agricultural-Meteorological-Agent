@@ -21,6 +21,7 @@ import { useRoute } from 'vue-router'
 import AppHeader from '@/components/AppHeader.vue'
 import AppNavDrawer from '@/components/AppNavDrawer.vue'
 import AppTabBar from '@/components/AppTabBar.vue'
+import { flags } from '@/config/flags'
 import { useAuthStore } from '@/stores/auth'
 import { useLocationStore } from '@/stores/location'
 
@@ -31,7 +32,7 @@ const location = useLocationStore()
 /** 当前视口宽度，驱动顶栏/导航的形态切换 */
 const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth)
 const menuOpen = ref(false)
-/** 登录/核验页是独立整页，不显示顶栏与导航（否则点了也是被弹回登录页） */
+/** 登录/核验页是独立整页，不显示顶栏与导航；演示形态下路由不会停在这里 */
 const isGate = computed(() => route.path === '/login')
 
 function onResize() {
@@ -42,8 +43,9 @@ function onResize() {
 
 onMounted(async () => {
   window.addEventListener('resize', onResize)
-  // 位置存在账号分桶里，必须先确定身份再恢复，否则会读到未分桶的旧数据
-  await auth.fetchMe()
+  // 开启登录时必须先确定身份再恢复位置，否则会读到未分桶的旧数据；
+  // 演示形态（LOGIN_REQUIRED=false）没有账号概念，跳过这次核验请求
+  if (flags.LOGIN_REQUIRED) await auth.fetchMe()
   if (!location.provinces.length) await location.init()
 })
 

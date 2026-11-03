@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """智能问答路由：会话记忆 + UQ 置信度分级 + 合规审查 + 短临降水提示 + 反馈闭环"""
+import asyncio
 import json
 import logging
 import sqlite3
+import time
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -11,7 +13,7 @@ from typing import AsyncGenerator, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from ..deps import get_agent, get_optional_user, get_settings
+from ..deps import get_agent_for_chat, get_optional_user, get_settings
 from ..schemas.chat import (
     ChatRequest, ChatResponse, DisasterWarningItem, DiseaseRiskItem,
     ComplianceInfo, UncertaintyInfo,
@@ -36,6 +38,14 @@ def _resolve_crop(name: str):
         return CropType.CORN
 
 NOWCAST_HOURS = 6
+
+# 准备上下文阶段每这么久没动静就补一帧进度，保证连接上始终有字节在流
+HEARTBEAT_SECONDS = 2.0
+
+
+def _sse(payload: dict) -> str:
+    """一行 SSE data 帧"""
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 # ---------- 短临降水提示 ----------
@@ -154,7 +164,7 @@ def _build_response(response, req: ChatRequest, nowcast: Optional[str]) -> ChatR
 # ---------- 主问答接口 ----------
 
 @router.post("", response_model=ChatResponse)
-async def chat(req: ChatRequest, agent=Depends(get_agent), user: dict | None = Depends(get_optional_user)):
+async def chat(req: ChatRequest, agent=Depends(get_agent_for_chat), user: dict | None = Depends(get_optional_user)):
     """智能问答（完整返回，含会话记忆/合规/UQ/短临提示）"""
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="query 不能为空")
@@ -198,8 +208,8 @@ async def chat(req: ChatRequest, agent=Depends(get_agent), user: dict | None = D
 
 
 @router.post("/stream")
-async def chat_stream(req: ChatRequest, agent=Depends(get_agent), user: dict | None = Depends(get_optional_user)):
-    """智能问答（SSE 流式）：token 逐步推送，done 事件携带元数据"""
+async def chat_stream(req: ChatRequest, agent=Depends(get_agent_for_chat), user: dict | None = Depends(get_optional_user)):
+    """智能问答（SSE 流式）：status 进度 + token 逐步推送，done 事件携带元数据"""
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="query 不能为空")
     if not req.session_id:
@@ -209,6 +219,12 @@ async def chat_stream(req: ChatRequest, agent=Depends(get_agent), user: dict | N
     user_id = user["id"] if user else (req.user_id or "api_user")
 
     async def event_generator() -> AsyncGenerator[str, None]:
+        started_at = time.perf_counter()
+        ttft = None            # 首个 token 相对开流的秒数
+        n_tokens = 0
+        outcome = "done"
+        prepare_task = None
+
         try:
             from src.models import UserType, Location
             user_type_val = getattr(UserType, USER_TYPE_MAP.get(req.user_type, "FARMER"), UserType.FARMER)
@@ -218,20 +234,32 @@ async def chat_stream(req: ChatRequest, agent=Depends(get_agent), user: dict | N
                 latitude=req.latitude, longitude=req.longitude,
             )
 
-            # 真流式：先准备上下文（意图/天气/规则/检索），再逐 token 产出
-            ctx = await agent.prepare_query(
+            # 意图/天气/规则/检索这段没有 token 可吐，用进度帧把连接填上，
+            # 否则前端只能对着空气泡转圈，看起来就像问答挂了
+            yield _sse({"type": "status", "content": "正在识别意图、获取气象、检索知识库…"})
+            prepare_task = asyncio.create_task(agent.prepare_query(
                 query=req.query.strip(),
                 user_id=user_id,
                 session_id=req.session_id,
                 user_type=user_type_val,
                 location=location,
                 crop_type=crop_type_val,
-            )
+            ))
+            waited = 0.0
+            while True:
+                ready, _ = await asyncio.wait({prepare_task}, timeout=HEARTBEAT_SECONDS)
+                if ready:
+                    break
+                waited += HEARTBEAT_SECONDS
+                yield _sse({"type": "status", "content": f"上下文准备中（已 {waited:.0f} 秒）…"})
+            ctx = prepare_task.result()
 
             # nowcast 复用 ctx 已拉取的气象数据（不再二次请求）
             nowcast = _compute_nowcast(ctx.get("weather_list") or [])
             if nowcast:
-                yield f"data: {json.dumps({'type': 'nowcast', 'content': nowcast}, ensure_ascii=False)}\n\n"
+                yield _sse({"type": "nowcast", "content": nowcast})
+
+            yield _sse({"type": "status", "content": "开始生成回答…"})
 
             tokens = []
             if not agent.llm_available:
@@ -239,22 +267,39 @@ async def chat_stream(req: ChatRequest, agent=Depends(get_agent), user: dict | N
                 fallback = agent._fallback_response(ctx["structured_results"], ctx["weather_data"])
                 tokens.append(fallback)
                 if fallback:
-                    yield f"data: {json.dumps({'type': 'token', 'content': fallback}, ensure_ascii=False)}\n\n"
+                    yield _sse({"type": "token", "content": fallback})
             else:
                 async for chunk in agent.llm_client.astream_chat(ctx["messages"], temperature=0.3):
+                    if ttft is None:
+                        ttft = time.perf_counter() - started_at
+                    n_tokens += 1
                     tokens.append(chunk)
                     if chunk:
-                        yield f"data: {json.dumps({'type': 'token', 'content': chunk}, ensure_ascii=False)}\n\n"
+                        yield _sse({"type": "token", "content": chunk})
 
             content = "".join(tokens)
             response = agent._finalize_response(ctx, content)
 
             meta = _build_response(response, req, nowcast)
             meta.content = ""
-            yield f"data: {json.dumps({'type': 'done', 'meta': meta.model_dump()}, ensure_ascii=False)}\n\n"
-        except Exception as e:
-            logger.error(f"流式问答失败: {e}", exc_info=True)
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+            yield _sse({"type": "done", "meta": meta.model_dump()})
+        except Exception as e:  # noqa: BLE001
+            outcome = "error"
+            error_text = str(e) or type(e).__name__
+            logger.error(f"流式问答失败: {error_text}", exc_info=True)
+            yield _sse({"type": "error", "message": error_text})
+        finally:
+            if prepare_task is not None and not prepare_task.done():
+                prepare_task.cancel()
+            # access 日志打在响应头那一刻，看不出成败；这条才是真正的问题答案
+            logger.info(
+                "流式问答收口 | 结果=%s 首token=%.1fs 总耗时=%.1fs token块=%d 问题=%.40s",
+                outcome,
+                ttft if ttft is not None else -1.0,
+                time.perf_counter() - started_at,
+                n_tokens,
+                req.query.strip(),
+            )
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     # Cookie 是否 secure（Studio HTTPS 下强制 true；本地 http 必须 false）
     COOKIE_SECURE: bool = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 
+    # ---------- 访问形态 ----------
+    # AUTH_REQUIRED=false（默认）= 免登录演示：没有会话 cookie 的请求统一归到
+    # GUEST_USER_ID 这个共享身份，地块都落 data/users/{guest}/agri_weather.db。
+    # 昵称+密码登录那套代码原样保留，把本开关设回 true 即恢复登录门槛；
+    # 前端还有一个对应的 flags.LOGIN_REQUIRED，两边要一起开才算真正启用登录。
+    AUTH_REQUIRED: bool = os.getenv("AUTH_REQUIRED", "false").lower() == "true"
+    GUEST_USER_ID: str = os.getenv("GUEST_USER_ID", "guest")
+
     VECTOR_DB_PATH: str = str(BASE_DIR / "knowledge_bases" / "agri_knowledge")
     FAISS_INDEX_TYPE: str = "flat"
 

@@ -28,6 +28,19 @@ logger = logging.getLogger("agri-backend.deps")
 # lru_cache 不保证只算一次，用锁串行化，避免起两份模型把内存打爆
 _AGENT_LOCK = threading.Lock()
 
+# 智能体预热状态：pending（还在加载）/ ready / failed（预热抛过异常）
+# 问答接口靠它区分「再等一会儿」和「这次加载失败了、可以现场重试」，
+# 否则冷启动期间的每个请求都会压在 _AGENT_LOCK 上干等几十秒。
+_AGENT_STATE: dict = {"status": "pending"}
+
+
+def mark_agent_ready() -> None:
+    _AGENT_STATE["status"] = "ready"
+
+
+def mark_agent_failed() -> None:
+    _AGENT_STATE["status"] = "failed"
+
 
 @lru_cache(maxsize=1)
 def get_agent():
@@ -42,6 +55,20 @@ def get_agent():
             embedding_model=settings.EMBEDDING_MODEL,
         )
         return agent
+
+
+def get_agent_for_chat():
+    """问答接口专用依赖：预热未完成时立刻 503，让前端明确提示加载中。"""
+    if _AGENT_STATE["status"] == "pending":
+        raise HTTPException(
+            status_code=503,
+            detail="智能体正在加载（首次启动约需 1 分钟），请稍后重试",
+            headers={"Retry-After": "30"},
+        )
+    agent = get_agent()
+    if _AGENT_STATE["status"] == "failed":
+        mark_agent_ready()
+    return agent
 
 
 @lru_cache(maxsize=1)
@@ -81,17 +108,32 @@ def get_farm_manager_deprecated():
     return PersistentFarmManager()
 
 
+def _guest_user() -> dict:
+    """免登录演示形态下的共享身份（所有访客共用一份地块库）。"""
+    return {
+        "id": settings.GUEST_USER_ID,
+        "nickname": "访客",
+        "avatar": "",
+        "provider": "guest",
+    }
+
+
 def get_current_user(request: Request) -> dict:
-    """FastAPI 依赖：当前登录用户（未登录抛 401）。"""
+    """FastAPI 依赖：当前登录用户；AUTH_REQUIRED=false 时无 cookie 就按共享访客放行。"""
     user = get_session_user(request)
-    if not user:
+    if user:
+        return user
+    if settings.AUTH_REQUIRED:
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
-    return user
+    return _guest_user()
 
 
 def get_optional_user(request: Request) -> dict | None:
-    """FastAPI 依赖：当前登录用户（未登录返回 None，用于兼容未鉴权兜底）。"""
-    return get_session_user(request)
+    """FastAPI 依赖：有 cookie 用 cookie 身份；免登录形态统一回共享访客，保持与农场库同一个 user_id。"""
+    user = get_session_user(request)
+    if user or settings.AUTH_REQUIRED:
+        return user
+    return _guest_user()
 
 
 # 每用户农场管理器缓存：key = user_id，value = PersistentFarmManager(指向该用户独立子库)

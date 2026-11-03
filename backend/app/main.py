@@ -19,10 +19,14 @@ logger = logging.getLogger("agri-backend")
 
 def _warm_up_agent() -> None:
     """后台预热智能体：要下载/加载 Embedding 模型，可能耗时几分钟，不能放在启动路径上。"""
+    from .deps import mark_agent_failed, mark_agent_ready
     try:
         agent = get_agent()
+        mark_agent_ready()
         logger.info(f"✅ 智能体初始化成功 | RAG={'启用' if agent.rag_engine and agent.rag_engine.vector_db else '未启用'}")
     except Exception as e:
+        # 预热失败不锁死问答：标记 failed，后续请求可现场重试初始化
+        mark_agent_failed()
         logger.error(f"❌ 智能体初始化失败: {e}")
 
 

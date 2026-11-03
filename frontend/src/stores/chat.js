@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { chatApi } from '@/api'
+import { flags } from '@/config/flags'
 import { useLocationStore } from './location'
 import { useAuthStore } from './auth'
 import { KEYS, readJSON, writeJSON } from '@/utils/storage'
@@ -31,6 +32,7 @@ function createMessage(role, content, extra = {}) {
     meta: null,
     status: role === 'user' ? 'done' : 'streaming',
     errorMsg: '',
+    progress: '',
     latencyMs: 0,
     feedback: null,
     ...extra
@@ -112,6 +114,8 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function persist() {
+    // 演示形态：对话只活在当前页面进程里，关掉开关就既不读也不写
+    if (!flags.PERSIST_CHAT) return true
     evictUntilFit()
     const payload = { v: 1, list: sessions.value, currentId: currentSessionId.value }
     return writeJSON(KEYS.SESSIONS, payload, {
@@ -135,11 +139,11 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
-  /** 从当前账号的分桶恢复会话 */
+  /** 恢复会话与偏好；PERSIST_CHAT 关闭时会话永远从空白开始，只恢复偏好 */
   function hydrate() {
     if (_hydrated) return
     _hydrated = true
-    const saved = readJSON(KEYS.SESSIONS, null)
+    const saved = flags.PERSIST_CHAT ? readJSON(KEYS.SESSIONS, null) : null
     const list = Array.isArray(saved?.list) ? saved.list : []
 
     if (list.length) {
@@ -164,13 +168,14 @@ export const useChatStore = defineStore('chat', () => {
 
   // -------------------------------------------------------- 会话管理
   function newSession() {
-    const session = createSession()
-    sessions.value = [session, ...sessions.value]
-    currentSessionId.value = session.id
+    const draft = createSession()
+    sessions.value = [draft, ...sessions.value]
+    currentSessionId.value = draft.id
     fallbackMode.value = false
     error.value = null
     persist()
-    return session
+    // 同上：首次提问时若不取代理，新会话里的消息永远不会实时刷新
+    return sessions.value.find((s) => s.id === draft.id) || draft
   }
 
   function switchSession(id) {
@@ -239,7 +244,8 @@ export const useChatStore = defineStore('chat', () => {
       session.messages.splice(0, session.messages.length - MAX_MESSAGES)
     }
     session.updatedAt = Date.now()
-    return message
+    // 必须返回数组里的响应式代理：原始对象的 mutation 不触发渲染
+    return session.messages[session.messages.length - 1]
   }
 
   /** 会话标题取首条用户问题前 12 字 */
@@ -268,8 +274,36 @@ export const useChatStore = defineStore('chat', () => {
     ensureTitle(session, text)
     pushMessage(session, createMessage('user', text))
 
-    const answer = createMessage('assistant', '')
-    pushMessage(session, answer)
+    const answer = pushMessage(session, createMessage('assistant', '', { questionText: text }))
+    return runAnswer(session, answer, text)
+  }
+
+  /** 失败后原地重试：复用出错的回答气泡，不再新增用户消息 */
+  function retry(answerId) {
+    const session = currentSession.value
+    if (!session || streaming.value) return Promise.resolve(false)
+    const answer = session.messages.find((m) => m.id === answerId && m.role === 'assistant')
+    const text = String(answer?.questionText || '').trim()
+    if (!answer || !text) return Promise.resolve(false)
+    answer.content = ''
+    answer.meta = null
+    answer.errorMsg = ''
+    answer.status = 'streaming'
+    // 点重试即「再试一次流式」：否则一次降级会把本会话永久钉在非流式上
+    fallbackMode.value = false
+    return runAnswer(session, answer, text)
+  }
+
+  /** 流式被看门狗掐掉时的分档说明 */
+  function timeoutMessage(kind) {
+    if (kind === 'first-frame') return '后端 45 秒内没有任何响应，可能是模型正在冷启动'
+    if (kind === 'total') return '本次回答超过 3 分钟仍未结束，已中止'
+    return '回答中断：60 秒没有新内容'
+  }
+
+  /** 跑一次流式问答并落状态；ask 与 retry 共用同一条 assistant 消息 */
+  async function runAnswer(session, answer, text) {
+    answer.progress = ''
     streamingId.value = answer.id
     streaming.value = true
     error.value = null
@@ -283,6 +317,7 @@ export const useChatStore = defineStore('chat', () => {
 
     const finalize = (status, latencyMs = 0) => {
       answer.status = status
+      answer.progress = ''
       if (latencyMs) answer.latencyMs = latencyMs
       streaming.value = false
       streamingId.value = null
@@ -299,6 +334,8 @@ export const useChatStore = defineStore('chat', () => {
             if (evt.type === 'token') {
               gotAnyToken = true
               answer.content += evt.content || ''
+            } else if (evt.type === 'status') {
+              answer.progress = evt.content || ''
             } else if (evt.type === 'nowcast') {
               answer.meta = { ...(answer.meta || {}), nowcast_alert: evt.content || '' }
             } else if (evt.type === 'done') {
@@ -311,6 +348,20 @@ export const useChatStore = defineStore('chat', () => {
             }
           }
         })
+
+        if (result.timeoutKind) {
+          answer.errorMsg = timeoutMessage(result.timeoutKind)
+          finalize('error', Date.now() - startedAt)
+          error.value = answer.errorMsg
+          return false
+        }
+
+        if (result.status === 503) {
+          answer.errorMsg = '智能体正在加载（首次启动约需 1 分钟），稍后点重试'
+          finalize('error', Date.now() - startedAt)
+          error.value = answer.errorMsg
+          return false
+        }
 
         if (result.aborted) {
           finalize(answer.content ? 'aborted' : 'error', Date.now() - startedAt)
@@ -472,6 +523,7 @@ export const useChatStore = defineStore('chat', () => {
     setContext,
     setStreamEnabled,
     ask,
+    retry,
     stopStream,
     regenerate,
     submitFeedback,

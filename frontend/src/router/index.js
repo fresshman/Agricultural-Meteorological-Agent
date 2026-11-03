@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { flags } from '@/config/flags'
 import { useAuthStore } from '@/stores/auth'
 
 /**
@@ -48,10 +49,17 @@ const router = createRouter({
 })
 
 /**
- * 全局登录守卫：除 /login 外，所有页面都要求已登录（后端用 HttpOnly Cookie 识别身份）。
- * 身份是用户自己输昵称+密码换来的，Cookie 即身份，不需要每次打开再核验。
+ * 全局守卫。
+ *
+ * 演示形态（`flags.LOGIN_REQUIRED === false`）：不核验身份、不进登录页，
+ * 手输 `/login` 也送回主界面（登录代码保留，只是不给入口）。
+ * 开启登录后：除 `meta.public` 外都要求已登录，身份由后端 HttpOnly Cookie 识别。
  */
 router.beforeEach(async (to) => {
+  if (!flags.LOGIN_REQUIRED) {
+    return to.path === '/login' ? { path: '/dashboard' } : true
+  }
+
   const auth = useAuthStore()
   if (!auth.checked) {
     await auth.fetchMe()

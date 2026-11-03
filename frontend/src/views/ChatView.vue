@@ -101,6 +101,10 @@
                 </template>
                 <template v-else>
                   <MarkdownRenderer :content="m.content" :streaming="isStreaming(m)" />
+                  <p v-if="isStreaming(m) && m.progress" class="msg__progress">
+                    <el-icon class="is-loading" :size="14"><Loading /></el-icon>
+                    <span>{{ m.progress }}</span>
+                  </p>
                   <NowcastBanner
                     v-if="m.meta?.nowcast_alert"
                     class="msg__nowcast"
@@ -121,6 +125,12 @@
                   <p v-if="m.status === 'error'" class="msg__err">
                     <el-icon><WarningFilled /></el-icon>
                     {{ m.errorMsg || '生成失败，请重试' }}
+                    <button
+                      v-if="m.questionText"
+                      type="button"
+                      class="msg__retry"
+                      @click="onRetry(m)"
+                    >重试</button>
                   </p>
                 </template>
               </div>
@@ -239,6 +249,10 @@ async function onCopy(m) {
 }
 function onRegenerate(m) {
   chat.regenerate(m.id)
+}
+
+function onRetry(m) {
+  chat.retry(m.id)
 }
 
 // ---------------------------------------------------------------- 滚动吸底
@@ -509,6 +523,32 @@ html.dark .chat-view__example {
   margin: var(--sp-2) 0 0;
   font-size: var(--fs-caption);
   color: var(--state-danger);
+}
+
+.msg__progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+}
+
+.msg__retry {
+  margin-left: var(--sp-1);
+  padding: 2px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: transparent;
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+
+.msg__retry:hover {
+  border-color: var(--brand-500);
+  color: var(--brand-500);
 }
 
 .msg__meta {
