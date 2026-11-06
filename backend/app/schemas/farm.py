@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """农场管理请求/响应模型"""
+from datetime import date
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
 class FieldCreate(BaseModel):
-    name: str = Field(..., description="地块名称")
+    name: str = Field(..., min_length=1, max_length=20, description="地块名称")
     crop: str = Field("玉米", description="作物")
     stage: str = Field("播种期", description="生长阶段")
     area: float = Field(1.0, gt=0, description="面积（亩）")
+    planted_at: Optional[date] = Field(None, description="播种日期 YYYY-MM-DD，默认今天")
 
 
 class FieldItem(BaseModel):
@@ -36,13 +38,3 @@ class FieldActionResponse(BaseModel):
     success: bool
     message: str
     field: Optional[FieldItem] = None
-
-
-class FarmAlertItem(BaseModel):
-    field_name: str
-    crop: str
-    alerts: list[str]
-
-
-class FarmAlertsResponse(BaseModel):
-    alerts: list[FarmAlertItem]

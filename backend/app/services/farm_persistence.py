@@ -199,8 +199,15 @@ class PersistentFarmManager(FarmManager):
         super().set_location(province, city, district, lat, lon)
         self._save_location()
 
-    def create_field(self, name: str, crop: str, stage: str, area: float) -> FarmField:
-        field = super().create_field(name, crop, stage, area)
+    def create_field(
+        self,
+        name: str,
+        crop: str,
+        stage: str,
+        area: float,
+        planted_at: Optional[datetime] = None,
+    ) -> FarmField:
+        field = super().create_field(name, crop, stage, area, planted_at=planted_at)
         self._save_field(field)
         return field
 

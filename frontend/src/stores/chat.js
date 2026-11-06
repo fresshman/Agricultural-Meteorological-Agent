@@ -3,7 +3,6 @@ import { computed, ref } from 'vue'
 import { chatApi } from '@/api'
 import { flags } from '@/config/flags'
 import { useLocationStore } from './location'
-import { useAuthStore } from './auth'
 import { KEYS, readJSON, writeJSON } from '@/utils/storage'
 import { makeId } from '@/utils/format'
 
@@ -221,7 +220,6 @@ export const useChatStore = defineStore('chat', () => {
 
   function buildPayload(query, session) {
     const loc = useLocationStore()
-    const auth = useAuthStore()
     return {
       query,
       user_type: userType.value,
@@ -231,8 +229,7 @@ export const useChatStore = defineStore('chat', () => {
       province: loc.selected.province,
       city: loc.selected.city,
       district: loc.selected.district,
-      // 优先用登录用户 id（后端按此落各自独立子库）；未登录回退本地标识
-      user_id: auth.user?.id || 'local_user',
+      // 身份由服务端会话决定，前端不再传 user_id
       session_id: session.backendSessionId
     }
   }

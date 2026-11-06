@@ -12,95 +12,110 @@
  * UI 显示「需气象数据」，绝不编造实际长势数字。
  */
 
-/** 作物 → 规范化 key（兼容别称） */
-const CROP_ALIAS = [
-  { key: 'corn', test: /玉/, label: '玉米' },
-  { key: 'wheat', test: /麦/, label: '小麦' },
-  { key: 'rice', test: /稻/, label: '水稻' },
-  { key: 'soy', test: /大?豆/, label: '大豆' },
-  { key: 'potato', test: /马铃|土豆/, label: '马铃薯' }
+import { CROP_TYPES, getCropStages } from './crops'
+
+/** 作物名规范化：先精确匹配，再按别称匹配 */
+const CROP_ALIASES = [
+  ['玉米', /玉米|苞米|苞谷/],
+  ['小麦', /小麦/],
+  ['水稻', /水稻|稻谷/],
+  ['大豆', /大豆|黄豆/],
+  ['马铃薯', /马铃薯|土豆/],
+  ['莜麦', /莜麦|燕麦/],
+  ['番茄', /番茄|西红柿/],
+  ['黄瓜', /黄瓜/],
+  ['辣椒', /辣椒|尖椒/],
+  ['白菜', /白菜/],
+  ['菠菜', /菠菜/],
+  ['胡萝卜', /胡萝卜/],
+  ['苹果', /苹果/],
+  ['梨', /梨/],
+  ['桃', /桃/],
+  ['葡萄', /葡萄/],
+  ['柑橘', /柑橘|橘子|橙/],
+  ['月季', /月季|玫瑰/],
+  ['菊花', /菊花/],
+  ['百合', /百合/],
+  ['兰花', /兰花|蝴蝶兰/],
+  ['多肉植物', /多肉/]
 ]
 
-export const CROP_LABEL = { corn: '玉米', wheat: '小麦', rice: '水稻', soy: '大豆', potato: '马铃薯', unknown: '作物' }
-
-/** @returns {'corn'|'wheat'|'rice'|'soy'|'potato'|'unknown'} */
-export function cropKey(crop) {
-  const c = String(crop || '')
-  for (const a of CROP_ALIAS) if (a.test.test(c)) return a.key
-  return 'unknown'
+/** @returns {string} 规范化作物名；不认识的返回 '' */
+export function cropName(crop) {
+  const c = String(crop || '').trim()
+  if (!c) return ''
+  if (CROP_TYPES.includes(c)) return c
+  const hit = CROP_ALIASES.find(([, test]) => test.test(c))
+  return hit ? hit[0] : ''
 }
 
 /**
- * 物候配置（seasonDays 为全生育期天数；stages 为各阶段占比；
- * optMid/optTol 为最适均温与容忍带；waterNeed 为近 72h 期望降水 mm）。
- * 数值为常见作物经验近似，仅供可视化。
+ * 物候参数（seasonDays 为全生育期天数；optMid/optTol 为最适均温与容忍带；
+ * waterNeed 为近 72h 期望降水 mm）。数值为常见作物经验近似，仅供可视化。
+ * 阶段序列来自 utils/crops.js，与后端 CROP_CONFIG 一致。
  */
-export const CROP_PHENOLOGY = {
-  corn: {
-    seasonDays: 120,
-    optMid: 26, optTol: 10, waterNeed: 20,
-    color: 'var(--gold-500)',
-    stages: [
-      { name: '苗期', startFrac: 0, endFrac: 0.2 },
-      { name: '拔节期', startFrac: 0.2, endFrac: 0.45 },
-      { name: '抽雄吐丝', startFrac: 0.45, endFrac: 0.6 },
-      { name: '灌浆期', startFrac: 0.6, endFrac: 0.85 },
-      { name: '成熟期', startFrac: 0.85, endFrac: 1 }
-    ]
-  },
-  wheat: {
-    seasonDays: 230,
-    optMid: 18, optTol: 9, waterNeed: 15,
-    color: 'var(--gold-500)',
-    stages: [
-      { name: '出苗期', startFrac: 0, endFrac: 0.1 },
-      { name: '分蘖期', startFrac: 0.1, endFrac: 0.3 },
-      { name: '越冬期', startFrac: 0.3, endFrac: 0.5 },
-      { name: '返青拔节', startFrac: 0.5, endFrac: 0.7 },
-      { name: '抽穗期', startFrac: 0.7, endFrac: 0.85 },
-      { name: '灌浆期', startFrac: 0.85, endFrac: 0.95 },
-      { name: '成熟期', startFrac: 0.95, endFrac: 1 }
-    ]
-  },
-  rice: {
-    seasonDays: 150,
-    optMid: 27, optTol: 8, waterNeed: 25,
-    color: 'var(--sky-500)',
-    stages: [
-      { name: '秧苗期', startFrac: 0, endFrac: 0.15 },
-      { name: '分蘖期', startFrac: 0.15, endFrac: 0.4 },
-      { name: '拔节孕穗', startFrac: 0.4, endFrac: 0.6 },
-      { name: '抽穗开花', startFrac: 0.6, endFrac: 0.75 },
-      { name: '灌浆期', startFrac: 0.75, endFrac: 0.92 },
-      { name: '成熟期', startFrac: 0.92, endFrac: 1 }
-    ]
-  },
-  soy: {
-    seasonDays: 130,
-    optMid: 23, optTol: 8, waterNeed: 18,
-    color: 'var(--state-success)',
-    stages: [
-      { name: '出苗期', startFrac: 0, endFrac: 0.12 },
-      { name: '分枝期', startFrac: 0.12, endFrac: 0.35 },
-      { name: '开花期', startFrac: 0.35, endFrac: 0.55 },
-      { name: '结荚期', startFrac: 0.55, endFrac: 0.78 },
-      { name: '鼓粒期', startFrac: 0.78, endFrac: 0.93 },
-      { name: '成熟期', startFrac: 0.93, endFrac: 1 }
-    ]
-  },
-  potato: {
-    seasonDays: 100,
-    optMid: 17, optTol: 8, waterNeed: 16,
-    color: 'var(--state-orange)',
-    stages: [
-      { name: '出苗期', startFrac: 0, endFrac: 0.15 },
-      { name: '块茎形成', startFrac: 0.15, endFrac: 0.45 },
-      { name: '块茎膨大', startFrac: 0.45, endFrac: 0.8 },
-      { name: '淀粉积累', startFrac: 0.8, endFrac: 0.95 },
-      { name: '成熟期', startFrac: 0.95, endFrac: 1 }
-    ]
-  }
+const PHENOLOGY_PARAMS = {
+  玉米: { seasonDays: 120, optMid: 26, optTol: 10, waterNeed: 20, color: 'var(--gold-500)' },
+  小麦: { seasonDays: 240, optMid: 18, optTol: 9, waterNeed: 15, color: 'var(--gold-500)' },
+  水稻: { seasonDays: 150, optMid: 27, optTol: 8, waterNeed: 25, color: 'var(--sky-500)' },
+  大豆: { seasonDays: 130, optMid: 23, optTol: 8, waterNeed: 18, color: 'var(--state-success)' },
+  马铃薯: { seasonDays: 100, optMid: 17, optTol: 8, waterNeed: 16, color: 'var(--state-orange)' },
+  莜麦: { seasonDays: 100, optMid: 18, optTol: 9, waterNeed: 15, color: 'var(--gold-500)' },
+  番茄: { seasonDays: 120, optMid: 22, optTol: 8, waterNeed: 20, color: 'var(--state-danger)' },
+  黄瓜: { seasonDays: 90, optMid: 24, optTol: 8, waterNeed: 22, color: 'var(--state-success)' },
+  辣椒: { seasonDays: 120, optMid: 25, optTol: 8, waterNeed: 18, color: 'var(--state-danger)' },
+  白菜: { seasonDays: 70, optMid: 18, optTol: 9, waterNeed: 18, color: 'var(--state-success)' },
+  菠菜: { seasonDays: 50, optMid: 16, optTol: 9, waterNeed: 15, color: 'var(--state-success)' },
+  胡萝卜: { seasonDays: 100, optMid: 19, optTol: 8, waterNeed: 16, color: 'var(--state-orange)' },
+  苹果: { seasonDays: 180, optMid: 20, optTol: 9, waterNeed: 20, color: 'var(--state-danger)' },
+  梨: { seasonDays: 180, optMid: 20, optTol: 9, waterNeed: 20, color: 'var(--state-success)' },
+  桃: { seasonDays: 160, optMid: 22, optTol: 8, waterNeed: 18, color: 'var(--state-danger)' },
+  葡萄: { seasonDays: 150, optMid: 24, optTol: 8, waterNeed: 18, color: 'var(--brand-500)' },
+  柑橘: { seasonDays: 210, optMid: 24, optTol: 8, waterNeed: 20, color: 'var(--state-orange)' },
+  月季: { seasonDays: 120, optMid: 20, optTol: 8, waterNeed: 18, color: 'var(--state-danger)' },
+  菊花: { seasonDays: 120, optMid: 20, optTol: 8, waterNeed: 18, color: 'var(--gold-500)' },
+  百合: { seasonDays: 100, optMid: 18, optTol: 8, waterNeed: 16, color: 'var(--brand-500)' },
+  兰花: { seasonDays: 200, optMid: 22, optTol: 8, waterNeed: 18, color: 'var(--state-success)' },
+  多肉植物: { seasonDays: 120, optMid: 24, optTol: 10, waterNeed: 8, color: 'var(--state-success)' }
 }
+
+/** 按阶段名估算相对时长权重，用于把全生育期切成阶段区间 */
+const STAGE_WEIGHT_RULES = [
+  [/播种/, 0.6],
+  [/出苗|幼苗|秧苗|萌芽/, 0.9],
+  [/苗期/, 1.1],
+  [/分蘖|三叶|分枝/, 1.2],
+  [/越冬/, 2.2],
+  [/返青|拔节|伸蔓|定植|新芽/, 1.3],
+  [/抽雄|吐丝|孕穗|抽穗|现蕾|上色|抽薹/, 0.9],
+  [/开花/, 0.9],
+  [/坐果|结荚|结果/, 1.1],
+  [/灌浆|鼓粒|块茎|淀粉|膨大|结球|莲座|叶丛|生长期|肉质根/, 1.7],
+  [/成熟/, 0.7]
+]
+
+function stageBands(stages) {
+  if (!stages.length) return []
+  const weights = stages.map((name) => {
+    const hit = STAGE_WEIGHT_RULES.find(([re]) => re.test(name))
+    return hit ? hit[1] : 1
+  })
+  const total = weights.reduce((a, b) => a + b, 0) || 1
+  let acc = 0
+  return stages.map((name, i) => {
+    const startFrac = acc / total
+    acc += weights[i]
+    return { name, startFrac, endFrac: i === stages.length - 1 ? 1 : acc / total }
+  })
+}
+
+/** 22 种作物的物候配置（阶段区间由 stageBands 生成） */
+export const CROP_PHENOLOGY = Object.fromEntries(
+  Object.entries(PHENOLOGY_PARAMS).map(([crop, params]) => [
+    crop,
+    { ...params, stages: stageBands(getCropStages(crop)) }
+  ])
+)
 
 const STEEP = 7
 
@@ -137,9 +152,9 @@ function resolvePlantDate(field, pheno) {
  * @returns {Object|null} 模型；作物无法识别时返回 null
  */
 export function buildGrowthModel(field, weather) {
-  const key = cropKey(field?.crop)
-  if (key === 'unknown') return null
-  const pheno = CROP_PHENOLOGY[key]
+  const name = cropName(field?.crop)
+  const pheno = name ? CROP_PHENOLOGY[name] : null
+  if (!pheno || !pheno.stages.length) return null
   const plant = resolvePlantDate(field, pheno)
   const seasonMs = pheno.seasonDays * 86400000
   const harvest = new Date(plant.getTime() + seasonMs)
@@ -173,19 +188,27 @@ export function buildGrowthModel(field, weather) {
   }
   points[todayIndex].isToday = true
 
-  // 当前阶段
+  // 当前阶段：用户填写的阶段优先（后端收获判定也按它走），
+  // 匹配不到再按播种日期推演，最后落到首阶段，绝不出现 undefined
   const curStageObj = pheno.stages.find((s) => currentFrac >= s.startFrac && currentFrac < s.endFrac)
+  const userStage = pheno.stages.find((s) => String(field?.stage || '').includes(s.name))
   const harvested = currentDay >= pheno.seasonDays
-  const currentStage = harvested ? '已收获' : curStageObj ? curStageObj.name : pheno.stages[0].name
+  const currentStage = harvested
+    ? '已收获'
+    : userStage
+      ? userStage.name
+      : curStageObj
+        ? curStageObj.name
+        : pheno.stages[0].name
   const harvestEtaDays = harvested ? 0 : Math.max(0, Math.ceil(pheno.seasonDays - currentDay))
   const currentTheo = theoreticalValue(currentFrac)
   const currentActual = factor !== null ? Math.round(clamp(currentTheo * factor, 0, 100)) : null
   const deficit = currentActual !== null ? Math.round(currentTheo - currentActual) : null
 
   return {
-    key,
+    key: name,
     crop: field.crop,
-    cropLabel: CROP_LABEL[key],
+    cropLabel: name,
     seasonDays: pheno.seasonDays,
     plantDateIso: plant.toISOString().slice(0, 10),
     harvestDateIso: harvest.toISOString().slice(0, 10),
@@ -207,3 +230,20 @@ export function buildGrowthModel(field, weather) {
 }
 
 export { theoreticalValue }
+
+/**
+ * 按播种日期推算当前阶段（新建地块时把「日期」与「阶段」对齐用）。
+ * @returns {string} 阶段名；作物或日期无效时返回 ''
+ */
+export function stageForDate(crop, isoDate) {
+  const name = cropName(crop)
+  const pheno = name ? CROP_PHENOLOGY[name] : null
+  if (!pheno || !pheno.stages.length || !isoDate) return ''
+  const raw = String(isoDate)
+  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T00:00:00` : raw)
+  if (Number.isNaN(d.getTime())) return ''
+  const frac = clamp((Date.now() - d.getTime()) / (pheno.seasonDays * 86400000), 0, 1)
+  if (frac >= 1) return pheno.stages[pheno.stages.length - 1].name
+  const hit = pheno.stages.find((s) => frac >= s.startFrac && frac < s.endFrac)
+  return hit ? hit.name : pheno.stages[0].name
+}

@@ -86,4 +86,24 @@ describe('weather store · daily7 按日聚合与「当天进行中」标记', (
     expect(weather.daily7).toEqual([])
     expect(weather.current).toBeNull()
   })
+
+  it('切位置时旧坐标的慢响应不会覆盖新坐标数据', async () => {
+    let resolveStale
+    weatherApi.get
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveStale = resolve }))
+      .mockResolvedValueOnce({ status: true, data: [sample(0, 12)], is_mock: false })
+
+    const weather = useWeatherStore()
+    const stale = weather.loadWeather(168)
+    const fresh = weather.loadWeather(168)
+    await fresh
+    expect(weather.available).toBe(true)
+
+    // 旧请求最后才回来，且内容是"无数据"：必须整体丢弃，不能让首页闪回空态
+    resolveStale({ status: false, data: [], message: '旧坐标无数据' })
+    await stale
+
+    expect(weather.available).toBe(true)
+    expect(weather.error).toBeNull()
+  })
 })

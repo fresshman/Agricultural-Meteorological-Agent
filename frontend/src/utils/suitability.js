@@ -400,34 +400,16 @@ export function fieldAdvice(field, metrics, agg72 = null) {
 }
 
 /**
- * 首页「今日待办农事」聚合：优先用地块警报，无地块时退化为基于今日气象的通用建议。
- * @param {{ alerts?: any[], daily7?: DayWeather[], cropType?: string, fields?: any[] }} input
+ * 首页「今日待办农事」：基于今日气象给出通用建议；气象不可用且已有地块时提示数据缺失。
+ * 数据源只用前端同一份气象 store，避免与卡片指标出现两套口径。
+ * @param {{ daily7?: DayWeather[], cropType?: string, fields?: any[] }} input
  * @returns {{ id: string, title: string, subtitle: string, score: number|null, level: string, reasons: string[], source: string }[]} 最多 5 条
  */
 export function buildTodayTodo(input = {}) {
-  const { alerts = [], daily7 = [], cropType = '', fields = [] } = input
+  const { daily7 = [], cropType = '', fields = [] } = input
   const today = daily7[0] || null
   const out = []
 
-  for (const alert of Array.isArray(alerts) ? alerts.slice(0, 5) : []) {
-    const name = alert?.field_name || alert?.name || alert?.field_id || '地块'
-    const type = alert?.alert_type || alert?.type || '农事提醒'
-    const level = alert?.risk_level || alert?.level || '低风险'
-    const msg = alert?.message || alert?.suggestion || alert?.advice || ''
-    out.push({
-      id: `alert_${alert?.field_id || name}_${type}`,
-      title: `${name} · ${type}`,
-      subtitle: msg || `风险等级：${level}`,
-      score: null,
-      level,
-      reasons: msg ? [msg] : [],
-      source: 'alert'
-    })
-  }
-
-  if (out.length) return out.slice(0, 5)
-
-  // 无地块警报：基于今日气象给出 3 项通用建议（标注为通用）
   const genericOps = ['喷药', '灌溉', '采收']
   for (const op of genericOps) {
     const cell = scoreDay(op, today)

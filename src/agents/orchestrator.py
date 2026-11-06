@@ -12,8 +12,9 @@
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta, date
 import json
+import re
 from src.models import (
-    UserType, CropType, Location, FieldInfo,
+    UserType, CropType, Location, FieldInfo, WeatherData,
     AgriculturalWeatherData, OperationRecommendation,
     DisasterWarning, DiseaseRisk, AgentResponse
 )
@@ -24,7 +25,9 @@ from src.tools.agent_tools import (
     ToolRegistry, WeatherQueryTool, CropGrowthCalculatorTool,
     FarmOperationJudgeTool, DisasterRiskAssessTool, KnowledgeRetrievalTool
 )
-from src.agents.llm_integration import RAGEngine, PromptBuilder
+from src.agents.llm_integration import (
+    RAGEngine, PromptBuilder, format_knowledge, compact_knowledge, KB_EVIDENCE_DOCS
+)
 from config.settings import settings, CROP_GROWTH_STAGES
 
 
@@ -50,6 +53,41 @@ class AgriculturalWeatherAgent:
         ("病虫害", ["病虫害", "病害", "虫害", "发病", "生虫"]),
         ("灾害", ["灾害", "预警", "霜冻", "暴雨", "高温", "干旱", "大风", "台风"]),
     ]
+
+    # 作物类别 → 对应专项工具（categories 与 CropType 保持一致）
+    _VEGETABLE_CROPS = {
+        CropType.TOMATO, CropType.CUCUMBER, CropType.PEPPER,
+        CropType.CABBAGE, CropType.SPINACH, CropType.CARROT,
+    }
+    _FRUIT_CROPS = {
+        CropType.APPLE, CropType.PEAR, CropType.PEACH,
+        CropType.GRAPE, CropType.CITRUS,
+    }
+    _FLOWER_CROPS = {
+        CropType.ROSE, CropType.CHRYSANTHEMUM, CropType.LILY,
+        CropType.ORCHID, CropType.SUCCULENT,
+    }
+
+    # 意图 → 气象适宜度工具的操作名（OperationWindow 中文值）
+    _INTENT_OPERATION = {
+        "播种": "播种", "灌溉": "灌溉", "植保": "喷药",
+        "施肥": "追肥", "收获": "采收",
+    }
+
+    _SPECIALIST_LABELS = {
+        "pest_disease_prediction": "病虫害气象潜势",
+        "symptom_diagnosis": "症状诊断",
+        "disaster_warning": "灾害预警（逐时次）",
+        "variety_recommend": "品种适配",
+        "crop_rotation": "茬口衔接",
+        "storage_risk": "仓储风险",
+        "greenhouse_environment": "棚室环境",
+        "vegetable_planting": "蔬菜种植",
+        "fruit_tree_management": "果树管理",
+        "flower_care": "花卉养护",
+        "weather_suitability": "作业适宜度",
+        "crop_growth_calculator": "生长进度",
+    }
 
     def __init__(
         self,
@@ -321,7 +359,7 @@ class AgriculturalWeatherAgent:
         weather_data, weather_list = await self._fetch_weather_data(field_info, intent_data)
 
         structured_results = await self._execute_rule_engine(
-            intent_data, weather_data, field_info
+            intent_data, weather_data, field_info, weather_list, query
         )
 
         knowledge_results = await self._retrieve_knowledge(query, field_info, intent_data)
@@ -330,7 +368,8 @@ class AgriculturalWeatherAgent:
             json.dumps(structured_results, ensure_ascii=False, indent=2),
             weather_data.json() if weather_data else "无气象数据",
             query,
-            user_type
+            user_type,
+            knowledge_text=format_knowledge(knowledge_results)
         )
 
         # 多轮记忆：加载历史并注入 LLM 上下文
@@ -542,15 +581,19 @@ class AgriculturalWeatherAgent:
         self,
         intent_data: Dict[str, Any],
         weather_data: Optional[AgriculturalWeatherData],
-        field_info: Optional[FieldInfo]
+        field_info: Optional[FieldInfo],
+        weather_list: Optional[List[Dict[str, Any]]] = None,
+        query: str = ""
     ) -> Dict[str, Any]:
         """
-        执行规则引擎
+        执行规则引擎 + 按意图分发专项工具
 
         Args:
             intent_data: 意图数据
             weather_data: 气象数据
             field_info: 地块信息
+            weather_list: 原始逐时气象（含未来时次，供预警类工具使用）
+            query: 用户原始问题（专项工具按关键词识别）
 
         Returns:
             结构化结果
@@ -558,30 +601,41 @@ class AgriculturalWeatherAgent:
         results = {
             "operation_recommendations": [],
             "disaster_warnings": [],
-            "disease_risks": []
+            "disease_risks": [],
+            "specialist_advice": []
         }
 
         if not weather_data:
             return results
 
         intent = intent_data.get("intent", "其他")
+        crop_type = field_info.crop_type if field_info else None
+        growth_stage = self._estimate_growth_stage(
+            crop_type, field_info.sowing_date if field_info else None
+        )
 
-        if intent in ["播种", "灌溉", "施肥", "植保", "收获"]:
+        # 每种农事意图都必须落到具体工具：此前 施肥/收获 会被判成"不支持"静默丢弃
+        operation_rec = None
+        if intent == "施肥":
+            tool = self.tool_registry.get("fertilization_recommend")
+            operation_rec = self._as_operation(
+                tool.run(weather_data, "追肥", crop_type, growth_stage), "施肥"
+            )
+        elif intent == "收获" and crop_type:
+            tool = self.tool_registry.get("harvest_timing")
+            operation_rec = self._as_operation(
+                tool.run(
+                    weather_data,
+                    crop_type,
+                    maturity_progress=self._estimate_maturity_progress(crop_type, growth_stage),
+                ),
+                "收获",
+            )
+        elif intent in ("播种", "灌溉", "植保"):
             operation_tool = self.tool_registry.get("farm_operation_judge")
 
-            crop_type = None
-            growth_stage = None
-            if field_info:
-                crop_type = field_info.crop_type
-                growth_stage = self._estimate_growth_stage(
-                    crop_type, field_info.sowing_date
-                )
-
-            # 获取动态土壤墒情（复用估算逻辑）
             soil_moisture = None
             if weather_data and weather_data.base_weather:
-                from src.models import WeatherData as _W
-                # 使用规则引擎评估时传入动态墒情
                 try:
                     # 从农业气象数据的积温/降水反推一个合理墒情
                     precip = 0.0
@@ -591,7 +645,7 @@ class AgriculturalWeatherAgent:
                 except Exception:
                     soil_moisture = None
 
-            operation_result = operation_tool.run(
+            result = operation_tool.run(
                 operation_type=intent,
                 weather_data=weather_data,
                 crop_type=crop_type,
@@ -599,24 +653,211 @@ class AgriculturalWeatherAgent:
                 growth_stage=growth_stage,
                 location=field_info.location if field_info else None
             )
+            if "error" not in result:
+                operation_rec = result
 
-            if "error" not in operation_result:
-                results["operation_recommendations"].append(operation_result)
+        if operation_rec:
+            results["operation_recommendations"].append(operation_rec)
 
         disaster_tool = self.tool_registry.get("disaster_risk_assess")
         disaster_result = disaster_tool.run(
             weather_data=weather_data,
-            crop_type=field_info.crop_type if field_info else None,
-            growth_stage=self._estimate_growth_stage(
-                field_info.crop_type if field_info else None,
-                field_info.sowing_date if field_info else None
-            )
+            crop_type=crop_type,
+            growth_stage=growth_stage
         )
 
         results["disaster_warnings"] = disaster_result.get("disaster_warnings", [])
         results["disease_risks"] = disaster_result.get("disease_risks", [])
 
+        self._run_specialists(
+            query=query,
+            intent=intent,
+            weather_data=weather_data,
+            weather_list=weather_list or [],
+            field_info=field_info,
+            growth_stage=growth_stage,
+            results=results,
+        )
+
         return results
+
+    # ---------- 专项工具分发 ----------
+
+    @staticmethod
+    def _as_operation(rec: Optional[Dict[str, Any]], op_type: str) -> Optional[Dict[str, Any]]:
+        """把专项工具结果归一成 OperationRecommendation 的入参形状"""
+        if not rec or "error" in rec:
+            return None
+        window = rec.get("time_window") or []
+        if not rec.get("optimal_time") or len(window) != 2:
+            return None
+        return {
+            "operation_type": op_type,
+            "suitability_level": rec.get("suitability_level", ""),
+            "optimal_time": rec.get("optimal_time"),
+            "time_window": window,
+            "operation_details": rec.get("operation_details", ""),
+            "precautions": rec.get("precautions") or [],
+            "risk_warnings": rec.get("risk_warnings") or [],
+            "evidence": rec.get("evidence", ""),
+        }
+
+    @staticmethod
+    def _estimate_maturity_progress(
+        crop_type: Optional[CropType],
+        growth_stage: Optional[str]
+    ) -> float:
+        """按阶段在生育期中的位置估算成熟进度；无依据时用工具默认值"""
+        stages = CROP_GROWTH_STAGES.get(crop_type.value, []) if crop_type else []
+        if not stages or not growth_stage or growth_stage not in stages:
+            return 80.0
+        idx = stages.index(growth_stage)
+        return round((idx + 1) / len(stages) * 100, 1)
+
+    @staticmethod
+    def _forecast_weather(weather_list: List[Dict[str, Any]]) -> List[WeatherData]:
+        """只取当前及未来时次：预警类工具不能拿历史数据当"将要发生" """
+        cutoff = datetime.now() - timedelta(hours=1)
+        out: List[WeatherData] = []
+        for item in weather_list or []:
+            ts = item.get("timestamp")
+            if isinstance(ts, str):
+                try:
+                    ts = datetime.fromisoformat(ts)
+                except ValueError:
+                    continue
+            if not isinstance(ts, datetime) or ts < cutoff:
+                continue
+            try:
+                out.append(WeatherData(**item))
+            except Exception:
+                continue
+        return out
+
+    @staticmethod
+    def _season(when: Optional[datetime] = None) -> str:
+        month = (when or datetime.now()).month
+        if month in (3, 4, 5):
+            return "春季"
+        if month in (6, 7, 8):
+            return "夏季"
+        if month in (9, 10, 11):
+            return "秋季"
+        return "冬季"
+
+    @staticmethod
+    def _accumulated_temperature(
+        field_info: Optional[FieldInfo],
+        weather_data: Optional[AgriculturalWeatherData]
+    ) -> Optional[float]:
+        """按播种天数 × 近期日均温（10℃ 基点）粗估积温；无依据返回 None"""
+        sowing = getattr(field_info, "sowing_date", None) if field_info else None
+        if not sowing or not weather_data:
+            return None
+        days = (datetime.now().date() - sowing).days
+        if days <= 0:
+            return None
+        base = weather_data.base_weather
+        daily_mean = (base.max_temperature + base.min_temperature) / 2
+        return round(max(0.0, daily_mean - 10.0) * days, 1)
+
+    def _run_specialists(
+        self,
+        query: str,
+        intent: str,
+        weather_data: AgriculturalWeatherData,
+        weather_list: List[Dict[str, Any]],
+        field_info: Optional[FieldInfo],
+        growth_stage: Optional[str],
+        results: Dict[str, Any],
+    ) -> None:
+        """
+        按意图/关键词调用已注册的专项工具，结果并入 structured_results。
+        单个工具失败只跳过自己，不影响主回答。
+        """
+        q = query or ""
+        crop_type = field_info.crop_type if field_info else None
+        location = field_info.location if field_info else None
+        forecast = self._forecast_weather(weather_list)
+        advice = results.setdefault("specialist_advice", [])
+
+        def call(name: str, fn) -> None:
+            tool = self.tool_registry.get(name)
+            if not tool:
+                return
+            try:
+                payload = fn(tool)
+            except Exception as e:  # noqa: BLE001
+                print(f"专项工具 {name} 调用失败: {e}")
+                return
+            if payload:
+                advice.append({"tool": name, "result": payload})
+
+        # 病虫害：气象潜势（有"病/虫"即给）；症状诊断只在用户描述了症状时给，
+        # 否则会拿无关问题硬套出一堆诊断
+        if intent in ("病虫害", "植保") or re.search(r"病|虫", q):
+            if forecast:
+                call("pest_disease_prediction", lambda t: t.run(forecast, crop_type))
+            if re.search(r"黄叶|发黄|枯萎|枯死|斑点|卷叶|烂根|白粉|锈斑|虫咬|虫孔|萎蔫|倒伏", q) and crop_type:
+                call("symptom_diagnosis", lambda t: t.run(q, weather_data, crop_type, growth_stage))
+
+        # 灾害：按未来时次逐条判级（规则引擎只给当前时刻结论）
+        if intent == "灾害" or re.search(r"霜冻|暴雨|高温|干旱|大风|台风|冰雹|预警", q):
+            if forecast:
+                call("disaster_warning", lambda t: t.run(forecast, crop_type))
+
+        # 品种 / 茬口（茬口需要两种作物都出现在问题里，按出现顺序判定前后茬）
+        if re.search(r"品种|选种|种什么|什么品种|适合种", q) and location and crop_type:
+            call("variety_recommend", lambda t: t.run(location, crop_type))
+        if re.search(r"轮作|茬口|下茬|前茬|倒茬", q) and location:
+            mentioned = sorted(
+                (c for c in CropType if c.value in q), key=lambda c: q.index(c.value)
+            )
+            if len(mentioned) >= 2 and mentioned[0] != mentioned[1]:
+                call(
+                    "crop_rotation",
+                    lambda t: t.run(location, mentioned[0], datetime.now(), mentioned[1]),
+                )
+
+        # 仓储 / 棚室
+        if re.search(r"仓储|储存|储藏|入库|粮库|霉变", q):
+            call("storage_risk", lambda t: t.run(weather_data))
+        if re.search(r"大棚|温室|棚室|保护地", q):
+            call("greenhouse_environment", lambda t: t.run(weather_data, crop_type))
+
+        # 作物类别专项：蔬菜 / 果树 / 花卉
+        if crop_type in self._VEGETABLE_CROPS:
+            call("vegetable_planting", lambda t: t.run(weather_data, crop_type, self._season()))
+        elif crop_type in self._FRUIT_CROPS:
+            call(
+                "fruit_tree_management",
+                lambda t: t.run(weather_data, crop_type, growth_stage or "生长期"),
+            )
+        elif crop_type in self._FLOWER_CROPS:
+            call("flower_care", lambda t: t.run(weather_data, crop_type, self._season()))
+
+        # 生长进度：只有"长势相关"的问题且拿到明确播种日期才计算，避免拿默认值编进度
+        growth_relevant = intent in (
+            "播种", "灌溉", "施肥", "植保", "收获", "病虫害"
+        ) or bool(re.search(r"长势|生长|发育|成熟|阶段|积温|多大了", q))
+        sowing = getattr(field_info, "sowing_date", None) if field_info else None
+        if growth_relevant and sowing and crop_type:
+            acc_temp = self._accumulated_temperature(field_info, weather_data)
+            if acc_temp is not None:
+                sow_dt = (
+                    datetime.combine(sowing, datetime.min.time())
+                    if isinstance(sowing, date) and not isinstance(sowing, datetime)
+                    else sowing
+                )
+                call(
+                    "crop_growth_calculator",
+                    lambda t: t.run(crop_type, sow_dt, acc_temp),
+                )
+
+        # 作业适宜度：与当前意图对应的操作
+        op = self._INTENT_OPERATION.get(intent)
+        if op and forecast:
+            call("weather_suitability", lambda t: t.run(op, forecast, crop_type))
 
     async def _retrieve_knowledge(
         self,
@@ -682,10 +923,18 @@ class AgriculturalWeatherAgent:
         if structured_results.get("disease_risks"):
             evidence_parts.append(f"病虫害风险：检测到{len(structured_results['disease_risks'])}项风险")
 
-        if knowledge_results:
-            evidence_parts.append(f"知识库参考：引用{len(knowledge_results)}条资料")
+        for item in structured_results.get("specialist_advice", []):
+            label = self._SPECIALIST_LABELS.get(item.get("tool"), item.get("tool"))
+            evidence_parts.append(f"专项分析：{label}")
 
-        return "；".join(evidence_parts) if evidence_parts else "基于气象数据和农业标准"
+        if knowledge_results:
+            picked = compact_knowledge(knowledge_results, max_docs=KB_EVIDENCE_DOCS)
+            if picked:
+                titles = "、".join(f"《{item['title']}》" for item in picked)
+                evidence_parts.append(f"知识库参考：{titles}")
+
+        # 用换行分隔：前端「依据」面板按行渲染成列表项
+        return "\n".join(evidence_parts) if evidence_parts else "基于气象数据和农业标准"
 
     def _calculate_confidence(
         self,
@@ -715,6 +964,9 @@ class AgriculturalWeatherAgent:
 
         if structured_results.get("disease_risks"):
             confidence += 0.1
+
+        if structured_results.get("specialist_advice"):
+            confidence += 0.05
 
         return min(confidence, 1.0)
 

@@ -171,8 +171,7 @@ export const farmApi = {
   deleteField: (id) => http.delete(`/farm/fields/${id}`),
   water: (id) => http.post(`/farm/fields/${id}/water`),
   fertilize: (id) => http.post(`/farm/fields/${id}/fertilize`),
-  harvest: (id) => http.post(`/farm/fields/${id}/harvest`),
-  alerts: (params) => http.get('/farm/alerts', { params })
+  harvest: (id) => http.post(`/farm/fields/${id}/harvest`)
 }
 
 export const warningApi = {

@@ -23,7 +23,7 @@
     </div>
 
     <!-- 加载骨架 -->
-    <div v-if="farm.loading && !farm.fields.length" class="farm__grid">
+    <div v-if="farm.loading && !farm.fields.length" class="farm__grid farm__grid--skeleton">
       <SkeletonCard v-for="i in 4" :key="i" variant="card" :rows="3" />
     </div>
 
@@ -42,18 +42,24 @@
 
     <!-- 卡片网格 -->
     <el-row v-else :gutter="16" class="farm__grid">
-      <el-col v-for="f in filtered" :key="f.field_id" :xs="24" :sm="12" :md="8" :lg="6">
+      <el-col v-for="f in filtered" :key="f.field_id" :xs="24" :sm="12" :md="12" :lg="8">
         <FieldCard
           class="farm__cell"
           :field="f"
           :status="farm.fieldStatus(f)"
+          :harvest="burstId === f.field_id"
           @action="onAction"
         />
       </el-col>
     </el-row>
 
     <!-- 详情抽屉 -->
-    <FieldDetailDrawer v-model="drawerOpen" :field="activeField" @action="onAction" />
+    <FieldDetailDrawer
+      v-model="drawerOpen"
+      :field="activeField"
+      :harvesting="burstId === activeField?.field_id"
+      @action="onAction"
+    />
 
     <!-- 新建地块弹窗 -->
     <el-dialog v-model="createOpen" title="新建地块" width="420px" align-center>
@@ -62,14 +68,26 @@
           <el-input v-model="form.name" placeholder="如：东区一号田" maxlength="20" />
         </el-form-item>
         <el-form-item label="作物">
-          <el-select v-model="form.crop" class="farm__full">
+          <el-select v-model="form.crop" class="farm__full" @change="onCropChange">
             <el-option v-for="c in CROP_TYPES" :key="c" :label="c" :value="c" />
           </el-select>
         </el-form-item>
         <el-form-item label="生育阶段">
           <el-select v-model="form.stage" class="farm__full">
-            <el-option v-for="s in STAGES" :key="s" :label="s" :value="s" />
+            <el-option v-for="s in stageOptions" :key="s" :label="s" :value="s" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="播种日期">
+          <el-date-picker
+            v-model="form.planted_at"
+            type="date"
+            value-format="YYYY-MM-DD"
+            :disabled-date="isFutureDate"
+            :clearable="false"
+            placeholder="默认今天"
+            class="farm__full"
+            @change="onPlantedChange"
+          />
         </el-form-item>
         <el-form-item label="面积(亩)">
           <el-input-number v-model="form.area" :min="0.1" :step="0.5" :precision="1" class="farm__full" />
@@ -84,7 +102,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
@@ -95,13 +113,13 @@ import SkeletonCard from '@/components/SkeletonCard.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { useFarmStore } from '@/stores/farm'
 import { useWeatherStore } from '@/stores/weather'
-import { CROP_TYPES } from '@/utils/crops'
+import { CROP_TYPES, getCropStages } from '@/utils/crops'
+import { stageForDate } from '@/utils/growth'
 
 const router = useRouter()
 const farm = useFarmStore()
 const weather = useWeatherStore()
 
-const STAGES = ['播种期', '出苗期', '分蘖期', '拔节期', '抽穗期', '开花期', '灌浆期', '成熟期']
 const STATUS_OPTIONS = [
   { value: 'good', label: '状态良好' },
   { value: 'warn', label: '需关注' },
@@ -140,6 +158,24 @@ function openDetail(field) {
 }
 
 // ---------------------------------------------------------------- 操作
+/** 收获成功的迸发动画：只点亮对应地块 1 秒，之后复位，重复操作还能再触发 */
+const burstId = ref('')
+let burstTimer = null
+let burstStart = null
+function triggerBurst(fieldId) {
+  // 先清空再下一拍赋值：连点同一地块时 watch 仍能收到 false→true；
+  // 不用 requestAnimationFrame——后台/隐藏标签页里 rAF 会被挂起，动画就永远不触发
+  burstId.value = ''
+  clearTimeout(burstTimer)
+  clearTimeout(burstStart)
+  burstStart = setTimeout(() => {
+    burstId.value = fieldId
+  }, 0)
+  burstTimer = setTimeout(() => {
+    burstId.value = ''
+  }, 1100)
+}
+
 async function onAction(type, field) {
   if (type === 'detail') {
     openDetail(field)
@@ -157,7 +193,6 @@ async function onAction(type, field) {
     }
     await farm.deleteField(field.field_id)
     ElMessage.success('地块已删除')
-    await farm.loadAlerts()
     return
   }
   // water / fertilize / harvest
@@ -165,7 +200,7 @@ async function onAction(type, field) {
   try {
     await farm.doAction(field.field_id, type)
     ElMessage.success(`${map[type] || '操作'}成功`)
-    await farm.loadAlerts()
+    if (type === 'harvest') triggerBurst(field.field_id)
     if (activeField.value?.field_id === field.field_id) {
       activeField.value = farm.fieldsWithMetrics.find((f) => f.field_id === field.field_id) || null
     }
@@ -177,15 +212,43 @@ async function onAction(type, field) {
 // ---------------------------------------------------------------- 新建
 const createOpen = ref(false)
 const creating = ref(false)
-const form = ref({ name: '', crop: '玉米', stage: '播种期', area: 1.0 })
+const form = ref({ name: '', crop: '玉米', stage: '播种期', area: 1.0, planted_at: todayStr() })
+/** 阶段选项随作物变化（与后端 CROP_CONFIG 的阶段序列一致） */
+const stageOptions = computed(() => getCropStages(form.value.crop))
+
+/** 本地日期 YYYY-MM-DD（不用 toISOString，避免时区把日期推到前一天） */
+function todayStr() {
+  const d = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+function isFutureDate(d) {
+  const end = new Date()
+  end.setHours(23, 59, 59, 999)
+  return d.getTime() > end.getTime()
+}
+
+/** 换作物后旧阶段可能不存在，按播种日期重新对齐一次 */
+function onCropChange() {
+  onPlantedChange(form.value.planted_at)
+}
+/** 播种日期变化 → 阶段跟着走，避免日期与阶段互相矛盾 */
+function onPlantedChange(value) {
+  const s = stageForDate(form.value.crop, value)
+  if (s) form.value.stage = s
+}
 
 function openCreate() {
-  form.value = { name: '', crop: '玉米', stage: '播种期', area: 1.0 }
+  form.value = { name: '', crop: '玉米', stage: '播种期', area: 1.0, planted_at: todayStr() }
   createOpen.value = true
 }
 async function submitCreate() {
   if (!form.value.name.trim()) {
     ElMessage.warning('请填写地块名称')
+    return
+  }
+  if (!stageOptions.value.includes(form.value.stage)) {
+    ElMessage.warning('请选择该作物对应的生育阶段')
     return
   }
   creating.value = true
@@ -194,11 +257,11 @@ async function submitCreate() {
       name: form.value.name.trim(),
       crop: form.value.crop,
       stage: form.value.stage,
-      area: Number(form.value.area) || 1.0
+      area: Number(form.value.area) || 1.0,
+      planted_at: form.value.planted_at || todayStr()
     })
     ElMessage.success('地块创建成功')
     createOpen.value = false
-    await farm.loadAlerts()
   } catch (err) {
     ElMessage.error(err?.message || '创建失败')
   } finally {
@@ -206,10 +269,20 @@ async function submitCreate() {
   }
 }
 
-onMounted(() => {
-  if (!farm.fields.length) farm.loadFields()
-  if (!farm.alerts.length) farm.loadAlerts()
+onMounted(async () => {
+  if (!farm.fields.length) {
+    try {
+      await farm.loadFields()
+    } catch (err) {
+      ElMessage.error(err?.message || '地块加载失败，请稍后重试')
+    }
+  }
   if (!weather.available && !weather.loading) weather.loadWeather(168)
+})
+
+onBeforeUnmount(() => {
+  clearTimeout(burstTimer)
+  clearTimeout(burstStart)
 })
 </script>
 
@@ -220,6 +293,7 @@ onMounted(() => {
   gap: var(--sp-5);
   max-width: 1200px;
   margin: 0 auto;
+  padding: var(--sp-5) var(--sp-6);
 }
 
 .farm__filters {
@@ -240,9 +314,9 @@ onMounted(() => {
   color: var(--text-disabled);
 }
 
-.farm__grid {
-  display: flex;
-  flex-wrap: wrap;
+.farm__grid--skeleton {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: var(--sp-4);
 }
 
@@ -256,6 +330,9 @@ onMounted(() => {
 }
 
 @media (max-width: 767px) {
+  .farm {
+    padding: var(--sp-4) var(--gutter-mobile);
+  }
   .farm__filter {
     flex: 1 1 100%;
     width: 100%;

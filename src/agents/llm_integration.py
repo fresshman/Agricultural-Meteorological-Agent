@@ -3,6 +3,7 @@
 大语言模型集成和RAG问答
 """
 from typing import List, Dict, Optional, Tuple
+import re
 from src.models import UserType
 from src.utils.clients import LLMClient as RealLLMClient, EmbeddingClient
 from src.data import VectorDatabase, SmartChunker, TextCleaner
@@ -80,6 +81,8 @@ class RAGEngine:
                 {
                     "content": doc.content,
                     "source": doc.source,
+                    # 建库时为每条文档存了可读标题（如「【病虫害名称】香蕉冠腐病」），出处靠它
+                    "title": (doc.metadata or {}).get("title", ""),
                     "score": score,
                     "keywords": doc.keywords
                 }
@@ -166,6 +169,91 @@ class RAGEngine:
         return answer, search_results
 
 
+# ---------------------------------------------------------------- 知识压缩
+# 单条检索原文常达 1~2k 字符，top-5 近万字符：直接塞 prompt 会挤占上下文、拖慢首 token。
+# 进 prompt 前先压缩——按标题去重、截断单条摘录、控制总预算。
+KB_MAX_DOCS = 4
+KB_TITLE_CHARS = 40
+KB_EXCERPT_CHARS = 320
+KB_TOTAL_CHARS = 1400
+KB_EVIDENCE_DOCS = 3
+
+
+def knowledge_title(item: Dict) -> str:
+    """取资料标题：优先正文里的首个【字段】+ 名称，退化到 metadata.title / 首句"""
+    raw = str(item.get("title") or "").strip() or str(item.get("content") or "")
+    matched = re.search(r"【([^】]{1,12})】\s*([^\n【]{0,40})", raw)
+    if matched:
+        name = matched.group(2).strip().split()[0] if matched.group(2).strip() else ""
+        if name:
+            title = f"【{matched.group(1)}】{name}"
+        else:
+            title = f"【{matched.group(1)}】"
+    else:
+        content = str(item.get("content") or "").strip()
+        title = re.sub(r"\s+", " ", content.splitlines()[0]) if content else ""
+    title = re.sub(r"\s+", " ", title).strip().rstrip("，。；、")
+    if len(title) > KB_TITLE_CHARS:
+        title = title[:KB_TITLE_CHARS].rstrip() + "…"
+    return title or "未命名资料"
+
+
+def _excerpt(text: str, limit: int) -> str:
+    """压平空白后截断，尽量断在句末，避免把半句话塞给模型"""
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    for sep in ("。", "；", "！", "？", "，"):
+        pos = cut.rfind(sep)
+        if pos >= limit * 0.6:
+            return cut[:pos + 1] + "…"
+    return cut.rstrip() + "…"
+
+
+def compact_knowledge(
+    results: List[Dict],
+    max_docs: int = KB_MAX_DOCS,
+    excerpt_chars: int = KB_EXCERPT_CHARS,
+    total_chars: int = KB_TOTAL_CHARS
+) -> List[Dict[str, str]]:
+    """把检索结果压成可直接进 prompt 的短条目"""
+    picked: List[Dict[str, str]] = []
+    seen = set()
+    used = 0
+    for item in results or []:
+        if len(picked) >= max_docs:
+            break
+        title = knowledge_title(item)
+        if title in seen:
+            continue
+        excerpt = _excerpt(item.get("content"), excerpt_chars)
+        if excerpt.startswith(title) and len(excerpt) - len(title) >= 20:
+            # 摘录不要把标题再念一遍；剩余太短则保留原文，避免整条被吞掉
+            excerpt = excerpt[len(title):].lstrip(" ：:，,、")
+        if not excerpt:
+            continue
+        if picked and used + len(excerpt) > total_chars:
+            break
+        seen.add(title)
+        picked.append({
+            "title": title,
+            "source": str(item.get("source") or ""),
+            "excerpt": excerpt
+        })
+        used += len(excerpt)
+    return picked
+
+
+def format_knowledge(results: List[Dict]) -> str:
+    """压成 prompt 片段；未命中返回空串，由 prompt 说明「本次未检索到资料」"""
+    lines = []
+    for i, item in enumerate(compact_knowledge(results), 1):
+        source = f"（{item['source']}）" if item["source"] else ""
+        lines.append(f"{i}. 《{item['title']}》{source}：{item['excerpt']}")
+    return "\n".join(lines)
+
+
 class PromptBuilder:
     """提示词构建器"""
     
@@ -198,6 +286,7 @@ class PromptBuilder:
 
 输出规范：
 - 所有建议必须附带明确气象依据、农业标准依据
+- 引用参考资料时标注「依据：《资料标题》」；资料未覆盖的内容不要编造出处
 - 使用农户口语化表达，具体可执行
 - 标注风险等级与适用范围，不输出绝对化结论
 - 区分用户类型，差异化输出内容深度
@@ -254,7 +343,8 @@ class PromptBuilder:
         structured_result: str,
         weather_data: str,
         user_query: str,
-        user_type: UserType
+        user_type: UserType,
+        knowledge_text: str = ""
     ) -> str:
         """
         构建回复生成提示词
@@ -264,11 +354,14 @@ class PromptBuilder:
             weather_data: 气象数据
             user_query: 用户问题
             user_type: 用户类型
+            knowledge_text: 已压缩的知识库摘录（format_knowledge 产出）
         
         Returns:
             回复生成提示词
         """
         user_config = USER_TYPES.get(user_type.value, USER_TYPES["普通农户"])
+        # 知识库没命中时显式声明，避免模型把常识当成本地资料编造出处
+        knowledge_block = knowledge_text.strip() or "（本次未检索到相关资料）"
         
         if user_type == UserType.FARMER:
             output_template = """
@@ -280,6 +373,9 @@ class PromptBuilder:
 
 专业建议：
 {result}
+
+参考资料（农业知识库摘录，仅作补充；引用时标注「依据：《资料标题》」，未列出的不要编造）：
+{knowledge}
 
 操作要点：
 1. 具体操作步骤（时间、用量、方式）
@@ -298,6 +394,9 @@ class PromptBuilder:
 
 专业分析：
 {result}
+
+参考资料（农业知识库摘录，仅作补充；引用时标注「依据：《资料标题》」，未列出的不要编造）：
+{knowledge}
 
 生产方案：
 1. 操作时机与窗口期
@@ -320,6 +419,9 @@ class PromptBuilder:
 专业分析结果：
 {result}
 
+参考资料（农业知识库摘录，仅作补充；引用时标注「依据：《资料标题》」，未列出的不要编造）：
+{knowledge}
+
 技术要点：
 1. 数据依据：气象参数、阈值标准
 2. 模型依据：计算方法、参数来源
@@ -333,6 +435,7 @@ class PromptBuilder:
         return output_template.format(
             query=user_query,
             weather=weather_data,
-            result=structured_result
+            result=structured_result,
+            knowledge=knowledge_block
         )
 

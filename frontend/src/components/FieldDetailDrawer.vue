@@ -28,8 +28,14 @@
         <!-- 基本信息 -->
         <section class="drawer__section">
           <div class="drawer__hero">
-            <div class="drawer__hero-glyph">
-              <CropGlyph :crop="field.crop" :size="44" />
+            <div class="drawer__hero-scene">
+              <CropScene
+                :crop="field.crop"
+                :stage="field.stage"
+                :growth="growth"
+                :field-id="field.field_id"
+                :harvest="harvesting"
+              />
             </div>
             <div class="drawer__hero-info">
               <div class="drawer__facts drawer__facts--inline">
@@ -142,7 +148,7 @@ import { Pouring, MagicStick, Crop } from '@element-plus/icons-vue'
 import SuitabilityBar from '@/components/SuitabilityBar.vue'
 import WeatherChart from '@/components/WeatherChart.vue'
 import EmptyState from '@/components/EmptyState.vue'
-import CropGlyph from '@/components/CropGlyph.vue'
+import CropScene from '@/components/CropScene.vue'
 import GrowthCurve from '@/components/GrowthCurve.vue'
 import { useWeatherStore } from '@/stores/weather'
 import { useLocationStore } from '@/stores/location'
@@ -153,7 +159,9 @@ import { formatNumber, formatDate, formatDateTime } from '@/utils/format'
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   /** 经过 farm.fieldsWithMetrics 处理后的地块视图模型 */
-  field: { type: Object, default: null }
+  field: { type: Object, default: null },
+  /** 收获成功时置为 true，触发一次收获动画 */
+  harvesting: { type: Boolean, default: false }
 })
 const emit = defineEmits(['update:modelValue', 'action'])
 
@@ -273,22 +281,15 @@ function onAction(type) {
 }
 .drawer__hero {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: var(--sp-4);
 }
-.drawer__hero-glyph {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 64px;
-  height: 64px;
+.drawer__hero-scene {
+  width: 100%;
+  height: 168px;
+  border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
-  background: var(--brand-50);
-  color: var(--brand-600);
-}
-html.dark .drawer__hero-glyph {
-  background: color-mix(in srgb, var(--brand-500) 16%, transparent);
+  overflow: hidden;
 }
 .drawer__hero-info {
   flex: 1 1 auto;

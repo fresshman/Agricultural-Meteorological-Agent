@@ -13,7 +13,6 @@ class ChatRequest(BaseModel):
     province: str = Field("", description="省份")
     city: str = Field("", description="城市")
     district: str = Field("", description="区县")
-    user_id: str = Field("api_user", description="用户ID（用于会话记忆）")
     session_id: str = Field("", description="会话ID（空则自动生成）")
 
 

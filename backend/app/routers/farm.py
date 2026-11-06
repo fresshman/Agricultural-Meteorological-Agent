@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """农场管理路由：包装 farm_core.FarmManager"""
 import logging
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..deps import get_farm_manager, get_weather_processor
+from ..deps import get_farm_manager
 from ..schemas.farm import (
     FieldCreate, FieldItem, FieldListResponse,
-    FieldActionResponse, FarmAlertsResponse, FarmAlertItem,
+    FieldActionResponse,
 )
 
 router = APIRouter()
@@ -43,8 +43,19 @@ async def list_fields(manager=Depends(get_farm_manager)):
 
 @router.post("/fields", response_model=FieldActionResponse)
 async def create_field(req: FieldCreate, manager=Depends(get_farm_manager)):
+    if req.planted_at and req.planted_at > date.today():
+        raise HTTPException(status_code=400, detail="播种日期不能晚于今天")
+    planted_at = (
+        datetime.combine(req.planted_at, datetime.min.time()) if req.planted_at else None
+    )
     try:
-        field = manager.create_field(name=req.name, crop=req.crop, stage=req.stage, area=req.area)
+        field = manager.create_field(
+            name=req.name,
+            crop=req.crop,
+            stage=req.stage,
+            area=req.area,
+            planted_at=planted_at,
+        )
         return FieldActionResponse(success=True, message="地块创建成功", field=_to_item(field))
     except Exception as e:
         logger.error(f"创建地块失败: {e}", exc_info=True)
@@ -87,39 +98,3 @@ async def harvest_field(field_id: str, manager=Depends(get_farm_manager)):
     field = manager.get_field(field_id)
     return FieldActionResponse(success=ok, message=msg, field=_to_item(field) if field else None)
 
-
-@router.get("/alerts", response_model=FarmAlertsResponse)
-async def get_alerts(
-    latitude: float = 34.75,
-    longitude: float = 113.65,
-    province: str = "",
-    city: str = "",
-    manager=Depends(get_farm_manager),
-    wp=Depends(get_weather_processor),
-):
-    """地块预警（联动实时气象数据驱动）"""
-    weather = {"temperature": 25.0, "humidity": 60.0, "precipitation": 0.0}
-    if wp:
-        try:
-            from datetime import datetime, timedelta
-            from src.models import Location
-
-            now = datetime.now()
-            loc = Location(province=province, city=city, latitude=latitude, longitude=longitude)
-            weather_list = await wp.fetch_weather_data(loc, now, now + timedelta(hours=1))
-            if weather_list:
-                w = weather_list[0]
-                weather = {
-                    "temperature": float(w.temperature),
-                    "humidity": float(w.humidity),
-                    "precipitation": float(w.precipitation),
-                }
-        except Exception as e:
-            logger.warning(f"获取实时气象失败，使用默认值: {e}")
-
-    raw = manager.get_all_alerts(weather)
-    alerts = [
-        FarmAlertItem(field_name=a.get("field_name", ""), crop=a.get("crop", ""), alerts=a.get("alerts", []))
-        for a in raw
-    ]
-    return FarmAlertsResponse(alerts=alerts)

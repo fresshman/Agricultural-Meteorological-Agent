@@ -15,17 +15,14 @@ vi.mock('@/api', () => ({
 
 import { chatApi } from '@/api'
 import { useChatStore } from '@/stores/chat'
-import { useAuthStore } from '@/stores/auth'
 
-describe('chat store · 提问 payload 的用户归属（每用户数据隔离的关键）', () => {
+describe('chat store · 提问 payload 不再携带身份（身份只认服务端会话）', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
   })
 
-  it('已登录：payload.user_id = 登录用户 id（后端据此落各自独立子库）', async () => {
-    const auth = useAuthStore()
-    auth.user = { id: 'ms_user_123', nickname: '张三' }
+  it('payload 不含 user_id，避免请求体覆盖登录身份', async () => {
     const chat = useChatStore()
     chat.streamEnabled = false // 走非流式 send，断言最直接
     chatApi.send.mockResolvedValue({ content: '好的', session_id: 'sess_back' })
@@ -34,20 +31,22 @@ describe('chat store · 提问 payload 的用户归属（每用户数据隔离�
 
     expect(chatApi.send).toHaveBeenCalledTimes(1)
     const payload = chatApi.send.mock.calls[0][0]
-    expect(payload.user_id).toBe('ms_user_123')
+    expect(payload).not.toHaveProperty('user_id')
     expect(payload.query).toBe('玉米什么时候播种？')
   })
 
-  it('未登录：payload.user_id 回退为 local_user', async () => {
-    const auth = useAuthStore()
-    auth.user = null
+  it('流式路径同样不携带 user_id', async () => {
     const chat = useChatStore()
-    chat.streamEnabled = false
-    chatApi.send.mockResolvedValue({ content: 'ok' })
+    chat.streamEnabled = true
+    chatApi.stream.mockImplementation(async (_payload, handlers) => {
+      handlers.onEvent({ type: 'token', content: 'ok' })
+      handlers.onEvent({ type: 'done', meta: { session_id: 's1' } })
+      return { ok: true }
+    })
 
     await chat.ask('测试一下')
 
-    const payload = chatApi.send.mock.calls[0][0]
-    expect(payload.user_id).toBe('local_user')
+    const payload = chatApi.stream.mock.calls[0][0]
+    expect(payload).not.toHaveProperty('user_id')
   })
 })

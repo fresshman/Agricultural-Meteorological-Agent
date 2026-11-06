@@ -266,64 +266,85 @@ class RuleEngine:
         """
         warnings = []
         base_weather = weather_data.base_weather
-        
-        if base_weather.min_temperature <= self.disaster_thresholds["霜冻"]["温度阈值"]:
+
+        frost = self.disaster_thresholds["霜冻"]
+        if base_weather.min_temperature <= frost["温度阈值"]:
             temp = base_weather.min_temperature
-            level = RiskLevel.MEDIUM
-            for level_name, threshold in self.disaster_thresholds["霜冻"]["预警等级"].items():
-                if temp <= threshold:
-                    level = RiskLevel(level_name)
-            
             warnings.append(DisasterWarning(
                 disaster_type=DisasterType.FROST,
-                risk_level=level,
+                risk_level=self._graded_level(frost, temp, higher_is_worse=False),
                 occur_time=datetime.now() + timedelta(hours=12),
                 duration=6,
                 intensity=f"最低温度{temp}℃",
                 defense_measures=["熏烟防霜", "田间灌水", "秸秆覆盖"],
                 emergency_actions=["提前抢收成熟作物", "加强田间巡查"]
             ))
-        
-        if base_weather.precipitation >= self.disaster_thresholds["暴雨"]["降水阈值"]:
+
+        rainstorm = self.disaster_thresholds["暴雨"]
+        if base_weather.precipitation >= rainstorm["降水阈值"]:
             precip = base_weather.precipitation
-            level = RiskLevel.MEDIUM
-            for level_name, threshold in self.disaster_thresholds["暴雨"]["预警等级"].items():
-                if precip >= threshold:
-                    level = RiskLevel(level_name)
-            
             warnings.append(DisasterWarning(
                 disaster_type=DisasterType.RAINSTORM,
-                risk_level=level,
+                risk_level=self._graded_level(rainstorm, precip, higher_is_worse=True),
                 occur_time=datetime.now(),
                 duration=24,
                 intensity=f"降水量{precip}mm",
                 defense_measures=["疏通沟渠", "加固田埂", "准备排水设备"],
                 emergency_actions=["抢收成熟作物", "及时排涝", "雨后松土通气"]
             ))
-        
-        if base_weather.max_temperature >= self.disaster_thresholds["高温热害"]["温度阈值"]:
+
+        heat = self.disaster_thresholds["高温热害"]
+        if base_weather.max_temperature >= heat["温度阈值"]:
             warnings.append(DisasterWarning(
                 disaster_type=DisasterType.HEAT_WAVE,
-                risk_level=RiskLevel.HIGH,
+                risk_level=self._graded_level(heat, base_weather.max_temperature, higher_is_worse=True),
                 occur_time=datetime.now() + timedelta(hours=6),
                 duration=12,
                 intensity=f"最高温度{base_weather.max_temperature}℃",
                 defense_measures=["田间灌水降温", "叶面喷肥", "喷施抗蒸腾剂"],
                 emergency_actions=["避开高温时段作业", "加强田间巡查"]
             ))
-        
-        if base_weather.wind_speed >= self.disaster_thresholds["大风"]["风速阈值"]:
+
+        wind = self.disaster_thresholds["大风"]
+        if base_weather.wind_speed >= wind["风速阈值"]:
             warnings.append(DisasterWarning(
                 disaster_type=DisasterType.STRONG_WIND,
-                risk_level=RiskLevel.MEDIUM,
+                risk_level=self._graded_level(wind, base_weather.wind_speed, higher_is_worse=True),
                 occur_time=datetime.now(),
                 duration=6,
                 intensity=f"风速{base_weather.wind_speed}m/s",
                 defense_measures=["加固设施大棚", "高秆作物培土固根", "搭架支撑"],
                 emergency_actions=["停止高空作业", "检查设施安全"]
             ))
-        
+
+        dry_hot = self.disaster_thresholds["干热风"]
+        if (base_weather.max_temperature >= dry_hot["温度阈值"]
+                and base_weather.humidity <= dry_hot["湿度上限"]
+                and base_weather.wind_speed >= dry_hot["风速下限"]):
+            warnings.append(DisasterWarning(
+                disaster_type=DisasterType.DRY_HOT_WIND,
+                risk_level=self._graded_level(dry_hot, base_weather.max_temperature, higher_is_worse=True),
+                occur_time=datetime.now() + timedelta(hours=6),
+                duration=8,
+                intensity=(
+                    f"温度{base_weather.max_temperature}℃、"
+                    f"湿度{base_weather.humidity}%、风速{base_weather.wind_speed}m/s"
+                ),
+                defense_measures=["及时灌溉增湿", "叶面喷施磷酸二氢钾", "营造防风林带"],
+                emergency_actions=["避开午间高温作业", "加强田间巡查"]
+            ))
+
         return warnings
+
+    @staticmethod
+    def _graded_level(section: dict, value: float, higher_is_worse: bool) -> RiskLevel:
+        """按阈值表把实况值映射为 RiskLevel；阈值表的键必须是合法的枚举值。"""
+        level = RiskLevel.LOW
+        for name, threshold in (section.get("预警等级") or {}).items():
+            hit = value >= threshold if higher_is_worse else value <= threshold
+            if hit:
+                level = RiskLevel(name)
+        return level
     
     def determine_growth_stage(
         self,

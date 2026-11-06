@@ -161,6 +161,104 @@ CROP_CONFIG = {
 }
 
 
+# 其余作物用紧凑表补齐：每行 = (阶段名, 图标, 需水阈值, 是否需追肥)
+# 与 config.settings.CROP_GROWTH_STAGES 的阶段序列保持一致（tests 会校验）。
+_COMPACT_CROPS = {
+    "大豆": ("🫘", 130, [
+        ("播种期", "🌱", 60, False), ("出苗期", "🌿", 65, False),
+        ("分枝期", "🌿", 75, True), ("开花期", "🌸", 80, True),
+        ("结荚期", "🫛", 80, True), ("鼓粒期", "🫘", 75, False),
+        ("成熟期", "🫘", 60, False),
+    ]),
+    "马铃薯": ("🥔", 100, [
+        ("播种期", "🌱", 60, False), ("出苗期", "🌿", 70, False),
+        ("块茎形成", "🥔", 75, True), ("块茎膨大", "🥔", 80, True),
+        ("淀粉积累", "🥔", 70, False), ("成熟期", "🥔", 55, False),
+    ]),
+    "辣椒": ("🌶️", 120, [
+        ("播种期", "🌱", 60, False), ("苗期", "🌿", 70, True),
+        ("定植期", "🌿", 75, True), ("开花期", "🌸", 75, True),
+        ("结果期", "🌶️", 80, True), ("成熟期", "🌶️", 65, False),
+    ]),
+    "白菜": ("🥬", 70, [
+        ("播种期", "🌱", 60, False), ("出苗期", "🌿", 65, False),
+        ("莲座期", "🥬", 75, True), ("结球期", "🥬", 80, True),
+        ("成熟期", "🥬", 60, False),
+    ]),
+    "菠菜": ("🥬", 50, [
+        ("播种期", "🌱", 60, False), ("出苗期", "🌿", 65, False),
+        ("叶丛期", "🥬", 70, True), ("抽薹期", "🌱", 70, False),
+        ("成熟期", "🥬", 55, False),
+    ]),
+    "胡萝卜": ("🥕", 100, [
+        ("播种期", "🌱", 60, False), ("出苗期", "🌿", 65, False),
+        ("叶丛期", "🌿", 70, True), ("肉质根膨大", "🥕", 75, True),
+        ("成熟期", "🥕", 55, False),
+    ]),
+    "苹果": ("🍎", 180, [
+        ("播种期", "🌱", 60, False), ("苗期", "🌿", 65, True),
+        ("开花期", "🌸", 70, True), ("坐果期", "🍏", 70, True),
+        ("果实膨大", "🍎", 75, True), ("成熟期", "🍎", 60, False),
+    ]),
+    "梨": ("🍐", 180, [
+        ("播种期", "🌱", 60, False), ("苗期", "🌿", 65, True),
+        ("开花期", "🌸", 70, True), ("坐果期", "🍐", 70, True),
+        ("果实膨大", "🍐", 75, True), ("成熟期", "🍐", 60, False),
+    ]),
+    "桃": ("🍑", 160, [
+        ("播种期", "🌱", 60, False), ("苗期", "🌿", 65, True),
+        ("开花期", "🌸", 70, True), ("坐果期", "🍑", 70, True),
+        ("果实膨大", "🍑", 75, True), ("成熟期", "🍑", 60, False),
+    ]),
+    "葡萄": ("🍇", 150, [
+        ("播种期", "🌱", 60, False), ("萌芽期", "🌿", 65, False),
+        ("开花期", "🌸", 70, True), ("坐果期", "🍇", 70, True),
+        ("果实膨大", "🍇", 75, True), ("成熟期", "🍇", 60, False),
+    ]),
+    "柑橘": ("🍊", 210, [
+        ("播种期", "🌱", 60, False), ("苗期", "🌿", 65, True),
+        ("开花期", "🌸", 70, True), ("坐果期", "🍊", 70, True),
+        ("果实膨大", "🍊", 75, True), ("成熟期", "🍊", 60, False),
+    ]),
+    "月季": ("🌹", 120, [
+        ("播种期", "🌱", 60, False), ("苗期", "🌿", 70, True),
+        ("分枝期", "🌿", 70, True), ("现蕾期", "✳️", 75, True),
+        ("开花期", "🌹", 75, False), ("成熟期", "🌹", 60, False),
+    ]),
+    "菊花": ("🌼", 120, [
+        ("播种期", "🌱", 60, False), ("苗期", "🌿", 70, True),
+        ("分枝期", "🌿", 70, True), ("现蕾期", "✳️", 75, True),
+        ("开花期", "🌼", 75, False), ("成熟期", "🌼", 60, False),
+    ]),
+    "百合": ("🌷", 100, [
+        ("播种期", "🌱", 60, False), ("出苗期", "🌿", 70, False),
+        ("现蕾期", "✳️", 75, True), ("开花期", "🌷", 75, False),
+        ("成熟期", "🌷", 60, False),
+    ]),
+    "兰花": ("🌸", 200, [
+        ("播种期", "🌱", 60, False), ("苗期", "🌿", 65, True),
+        ("新芽期", "🌿", 70, True), ("开花期", "🌸", 70, False),
+        ("成熟期", "🌸", 60, False),
+    ]),
+    "多肉植物": ("🪴", 120, [
+        ("播种期", "🌱", 55, False), ("幼苗期", "🌿", 60, False),
+        ("生长期", "🪴", 65, True), ("上色期", "🪴", 60, False),
+        ("成熟期", "🪴", 50, False),
+    ]),
+}
+
+for _crop_name, (_emoji, _duration, _rows) in _COMPACT_CROPS.items():
+    CROP_CONFIG[_crop_name] = {
+        "emoji": _emoji,
+        "duration": _duration,
+        "stages": [row[0] for row in _rows],
+        "stage_icons": {row[0]: row[1] for row in _rows},
+        "water_needs": {row[0]: row[2] for row in _rows},
+        "fertilizer_needs": {row[0]: row[3] for row in _rows},
+    }
+del _COMPACT_CROPS, _crop_name, _emoji, _duration, _rows
+
+
 # ==================== 地块类 ====================
 
 class FarmField:
@@ -173,7 +271,8 @@ class FarmField:
         crop: str,
         stage: str,
         area: float,
-        location: str
+        location: str,
+        planted_at: Optional[datetime] = None
     ):
         self.field_id = field_id
         self.name = name
@@ -190,7 +289,8 @@ class FarmField:
         
         # 时间记录
         self.created_at = datetime.now()
-        self.planted_at = datetime.now()
+        # 播种日期决定物候推演的起点，必须由用户指定而非默认"今天"
+        self.planted_at = planted_at or datetime.now()
         self.last_updated = datetime.now()
         
         # 操作记录
@@ -220,6 +320,7 @@ class FarmField:
             "emoji": config.get("emoji", "🌱"),
             "stage_icon": config.get("stage_icons", {}).get(self.stage, "🌱"),
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M"),
+            "planted_at": self.planted_at.isoformat(timespec="seconds"),
             "last_updated": self.last_updated.strftime("%Y-%m-%d %H:%M")
         }
 
@@ -248,14 +349,15 @@ class FarmManager:
         name: str,
         crop: str,
         stage: str,
-        area: float
+        area: float,
+        planted_at: Optional[datetime] = None
     ) -> FarmField:
         """创建新地块"""
         field_id = f"field_{datetime.now().strftime('%Y%m%d%H%M%S')}_{len(self.fields)}"
         
         location = f"{self.user_location['province']}{self.user_location['city']}{self.user_location['district']}"
         
-        field = FarmField(field_id, name, crop, stage, area, location)
+        field = FarmField(field_id, name, crop, stage, area, location, planted_at=planted_at)
         field.add_action(f"创建地块，种植{crop}，当前阶段：{stage}")
         
         self.fields[field_id] = field
@@ -283,8 +385,10 @@ class FarmManager:
             return False, "地块不存在"
         
         config = CROP_CONFIG.get(field.crop, {})
-        stages = config.get("stages", [])
-        
+        stages = config.get("stages") or []
+        if not stages:
+            return False, f"「{field.crop}」缺少物候配置，暂时无法判断是否成熟"
+
         if field.stage != stages[-1]:
             return False, f"作物还未成熟，当前阶段：{field.stage}"
         
@@ -371,57 +475,5 @@ class FarmManager:
             "stage": field.stage
         }
     
-    def get_field_alerts(self, field_id: str, weather: Dict) -> List[str]:
-        """获取地块预警信息"""
-        field = self.fields.get(field_id)
-        if not field or field.is_empty:
-            return []
-        
-        alerts = []
-        config = CROP_CONFIG.get(field.crop, {})
-        
-        # 水分预警
-        water_needs = config.get("water_needs", {}).get(field.stage, 70)
-        if field.water < water_needs - 15:
-            alerts.append(f"💧 需要浇水（当前{field.water}%，需要{water_needs}%）")
-        elif field.water < water_needs - 5:
-            alerts.append(f"⚠️ 水分偏低（{field.water}%）")
-        
-        # 施肥提醒
-        fertilizer_needs = config.get("fertilizer_needs", {}).get(field.stage, False)
-        if fertilizer_needs and field.health < 80:
-            alerts.append("🌱 建议施肥，增强作物营养")
-        
-        # 收获提醒
-        stages = config.get("stages", [])
-        if field.stage == stages[-1] and field.growth >= 80:
-            alerts.append(f"🌾 {field.crop}已成熟，可以收获！")
-        
-        # 气象预警
-        temp = weather.get("temperature", 25)
-        if temp > 35:
-            alerts.append("🌡️ 高温预警，注意遮阳降温")
-        elif temp < 5:
-            alerts.append("❄️ 低温预警，注意防寒保温")
-        
-        if weather.get("precipitation", 0) > 20:
-            alerts.append("🌧️ 大雨将至，注意排水防涝")
-        
-        return alerts
-    
-    def get_all_alerts(self, weather: Dict) -> List[Dict]:
-        """获取所有地块预警"""
-        all_alerts = []
-        for field in self.fields.values():
-            alerts = self.get_field_alerts(field.field_id, weather)
-            if alerts:
-                all_alerts.append({
-                    "field_name": field.name,
-                    "crop": field.crop,
-                    "alerts": alerts
-                })
-        return all_alerts
-
-
 # 全局农场管理器
 farm_manager = FarmManager()

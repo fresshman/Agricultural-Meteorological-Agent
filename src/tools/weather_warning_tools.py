@@ -10,6 +10,7 @@ from src.models import (
     DisasterWarning, PestDiseaseRisk, WeatherSuitabilityScore,
     OperationWindow, PestDiseaseType, WeatherData
 )
+from config.settings import DISASTER_THRESHOLDS
 
 
 class DisasterWarningTool:
@@ -19,66 +20,41 @@ class DisasterWarningTool:
         self.name = "disaster_warning"
         self.description = "气象灾害预警与应急农事对策"
         
+        thresholds = DISASTER_THRESHOLDS
+
+        def levels(key: str):
+            return {RiskLevel(name): value for name, value in thresholds[key]["预警等级"].items()}
+
         self.disaster_thresholds = {
             DisasterType.FROST: {
-                "min_temp": 0,
-                "risk_levels": {
-                    RiskLevel.LOW: 0,
-                    RiskLevel.MEDIUM: -2,
-                    RiskLevel.HIGH: -5,
-                    RiskLevel.CRITICAL: -10
-                }
+                "min_temp": thresholds["霜冻"]["温度阈值"],
+                "risk_levels": levels("霜冻")
             },
             DisasterType.LATE_SPRING_COLD: {
-                "min_temp": 5,
-                "risk_levels": {
-                    RiskLevel.LOW: 5,
-                    RiskLevel.MEDIUM: 2,
-                    RiskLevel.HIGH: 0,
-                    RiskLevel.CRITICAL: -3
-                }
+                "min_temp": thresholds["晚霜冻"]["温度阈值"],
+                "risk_levels": levels("晚霜冻")
             },
             DisasterType.HEAT_WAVE: {
-                "max_temp": 35,
-                "risk_levels": {
-                    RiskLevel.LOW: 35,
-                    RiskLevel.MEDIUM: 38,
-                    RiskLevel.HIGH: 40,
-                    RiskLevel.CRITICAL: 42
-                }
+                "max_temp": thresholds["高温热害"]["温度阈值"],
+                "risk_levels": levels("高温热害")
             },
             DisasterType.RAINSTORM: {
-                "precipitation": 50,
-                "risk_levels": {
-                    RiskLevel.LOW: 50,
-                    RiskLevel.MEDIUM: 80,
-                    RiskLevel.HIGH: 100,
-                    RiskLevel.CRITICAL: 150
-                }
+                "precipitation": thresholds["暴雨"]["降水阈值"],
+                "risk_levels": levels("暴雨")
             },
             DisasterType.DRY_HOT_WIND: {
-                "max_temp": 30,
-                "humidity": 30,
-                "wind_speed": 3,
-                "risk_levels": {
-                    RiskLevel.LOW: 30,
-                    RiskLevel.MEDIUM: 32,
-                    RiskLevel.HIGH: 35,
-                    RiskLevel.CRITICAL: 38
-                }
+                "max_temp": thresholds["干热风"]["温度阈值"],
+                "humidity": thresholds["干热风"]["湿度上限"],
+                "wind_speed": thresholds["干热风"]["风速下限"],
+                "risk_levels": levels("干热风")
             },
             DisasterType.TYPHOON: {
-                "wind_speed": 17.2,
-                "risk_levels": {
-                    RiskLevel.LOW: 17.2,
-                    RiskLevel.MEDIUM: 24.5,
-                    RiskLevel.HIGH: 32.7,
-                    RiskLevel.CRITICAL: 41.5
-                }
+                "wind_speed": thresholds["台风"]["风速阈值"],
+                "risk_levels": levels("台风")
             },
             DisasterType.HAIL: {
                 "risk_conditions": {
-                    "temp_drop": 10,
+                    "temp_drop": thresholds["冰雹"]["风险条件"]["温度骤降"],
                     "instability": "high"
                 }
             }
@@ -235,7 +211,9 @@ class DisasterWarningTool:
                 weather.wind_speed >= self.disaster_thresholds[DisasterType.DRY_HOT_WIND]["wind_speed"]):
                 warning = DisasterWarning(
                     disaster_type=DisasterType.DRY_HOT_WIND,
-                    risk_level=RiskLevel.HIGH,
+                    risk_level=self._grade(
+                        DisasterType.DRY_HOT_WIND, weather.max_temperature, higher_is_worse=True
+                    ),
                     occur_time=weather.timestamp,
                     duration=6,
                     intensity=f"温度{weather.max_temperature}°C，湿度{weather.humidity}%，风速{weather.wind_speed}m/s",
@@ -246,38 +224,38 @@ class DisasterWarningTool:
         
         return warnings
     
+    def run(
+        self,
+        weather_forecast: List[WeatherData],
+        crop_type: Optional[CropType] = None,
+        growth_stage: Optional[GrowthStage] = None
+    ) -> Dict[str, Any]:
+        """工具注册表统一入口"""
+        warnings = self.predict_disaster(
+            weather_forecast, crop_type or CropType.CORN, growth_stage
+        )
+        return {"warnings": [w.model_dump(mode="json") for w in warnings]}
+
+    def _grade(self, disaster_type: DisasterType, value: float, higher_is_worse: bool) -> RiskLevel:
+        """按统一阈值表分级，避免各处硬编码等级。"""
+        level = RiskLevel.LOW
+        for name, threshold in self.disaster_thresholds[disaster_type]["risk_levels"].items():
+            hit = value >= threshold if higher_is_worse else value <= threshold
+            if hit:
+                level = name
+        return level
+
     def _assess_frost_risk(self, min_temp: float) -> RiskLevel:
         """评估霜冻风险等级"""
-        if min_temp <= -10:
-            return RiskLevel.CRITICAL
-        elif min_temp <= -5:
-            return RiskLevel.HIGH
-        elif min_temp <= -2:
-            return RiskLevel.MEDIUM
-        else:
-            return RiskLevel.LOW
-    
+        return self._grade(DisasterType.FROST, min_temp, higher_is_worse=False)
+
     def _assess_heat_risk(self, max_temp: float) -> RiskLevel:
         """评估高温风险等级"""
-        if max_temp >= 42:
-            return RiskLevel.CRITICAL
-        elif max_temp >= 40:
-            return RiskLevel.HIGH
-        elif max_temp >= 38:
-            return RiskLevel.MEDIUM
-        else:
-            return RiskLevel.LOW
-    
+        return self._grade(DisasterType.HEAT_WAVE, max_temp, higher_is_worse=True)
+
     def _assess_rainstorm_risk(self, precipitation: float) -> RiskLevel:
         """评估暴雨风险等级"""
-        if precipitation >= 150:
-            return RiskLevel.CRITICAL
-        elif precipitation >= 100:
-            return RiskLevel.HIGH
-        elif precipitation >= 80:
-            return RiskLevel.MEDIUM
-        else:
-            return RiskLevel.LOW
+        return self._grade(DisasterType.RAINSTORM, precipitation, higher_is_worse=True)
 
 
 class PestDiseasePredictionTool:
@@ -363,6 +341,18 @@ class PestDiseasePredictionTool:
         
         return sorted(risks, key=lambda x: x.occur_probability, reverse=True)
     
+    def run(
+        self,
+        weather_forecast: List[WeatherData],
+        crop_type: Optional[CropType] = None,
+        growth_stage: Optional[GrowthStage] = None
+    ) -> Dict[str, Any]:
+        """工具注册表统一入口"""
+        risks = self.predict_pest_disease_risk(
+            weather_forecast, crop_type or CropType.CORN, growth_stage
+        )
+        return {"risks": [r.model_dump(mode="json") for r in risks]}
+
     def _get_relevant_diseases(self, crop_type: CropType) -> List[PestDiseaseType]:
         """获取作物相关病害"""
         disease_mapping = {
@@ -770,6 +760,18 @@ class WeatherSuitabilityTool:
             confidence=confidence
         )
     
+    def run(
+        self,
+        operation_type: Any,
+        weather_forecast: List[WeatherData],
+        crop_type: Optional[CropType] = None
+    ) -> Dict[str, Any]:
+        """工具注册表统一入口：operation_type 支持 OperationWindow 或其中文值"""
+        if isinstance(operation_type, str):
+            operation_type = OperationWindow(operation_type)
+        score = self.assess_operation_suitability(operation_type, weather_forecast, crop_type)
+        return {"suitability": score.model_dump(mode="json")}
+
     def _generate_weather_summary(self, weather_forecast: List[WeatherData]) -> str:
         """生成天气预报摘要"""
         if not weather_forecast:

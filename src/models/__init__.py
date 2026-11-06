@@ -15,6 +15,7 @@ class CropType(str, Enum):
     RICE = "水稻"
     SOYBEAN = "大豆"
     POTATO = "马铃薯"
+    BUCKWHEAT = "莜麦"
     
     # 蔬菜作物
     TOMATO = "番茄"

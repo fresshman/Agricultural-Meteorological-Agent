@@ -109,6 +109,9 @@ export function useChart(elRef, buildOption) {
   function render() {
     const el = elRef?.value
     if (!el) return
+    // 容器隐藏（v-show / 抽屉尚在动画中）时为 0×0，ECharts 会初始化失败并告警；
+    // 交给 ResizeObserver 等到有尺寸后再建图
+    if (!el.clientWidth || !el.clientHeight) return
     if (!chart.value) {
       chart.value = echarts.init(el, undefined, { renderer: 'canvas' })
     }
@@ -129,7 +132,13 @@ export function useChart(elRef, buildOption) {
     if (rafId) cancelAnimationFrame(rafId)
     rafId = requestAnimationFrame(() => {
       rafId = 0
-      chart.value?.resize()
+      // 首次可见时图还没建（render 因 0 尺寸跳过），尺寸到达后补建
+      if (!chart.value) {
+        const el = elRef?.value
+        if (el && el.clientWidth && el.clientHeight) render()
+        return
+      }
+      chart.value.resize()
     })
   }
 

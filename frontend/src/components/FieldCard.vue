@@ -2,8 +2,14 @@
   <article class="field-card card-hover">
     <header class="field-card__head">
       <div class="field-card__id">
-        <div class="field-card__crop-glyph">
-          <CropGlyph :crop="field.crop" :size="38" />
+        <div class="field-card__crop-scene">
+          <CropScene
+            :crop="field.crop"
+            :stage="field.stage"
+            :field-id="field.field_id"
+            :harvest="harvest"
+            :size="56"
+          />
         </div>
         <div class="field-card__title-wrap">
           <h3 class="field-card__name truncate">{{ field.name || '未命名地块' }}</h3>
@@ -67,14 +73,16 @@ import { computed } from 'vue'
 import { Pouring, MagicStick, Crop, View, Delete, FirstAidKit } from '@element-plus/icons-vue'
 import SuitabilityBar from '@/components/SuitabilityBar.vue'
 import RiskBadge from '@/components/RiskBadge.vue'
-import CropGlyph from '@/components/CropGlyph.vue'
+import CropScene from '@/components/CropScene.vue'
 import { formatNumber } from '@/utils/format'
 
 const props = defineProps({
   /** 经过 farm.fieldsWithMetrics 处理后的地块视图模型 */
   field: { type: Object, required: true },
   /** 状态等级：good / warn / risk / unknown */
-  status: { type: String, default: 'unknown' }
+  status: { type: String, default: 'unknown' },
+  /** 收获成功时置为 true，触发一次收获动画 */
+  harvest: { type: Boolean, default: false }
 })
 const emit = defineEmits(['action'])
 
@@ -113,20 +121,13 @@ const statusLabel = computed(() => STATUS_MAP[props.status] || STATUS_MAP.unknow
   min-width: 0;
 }
 
-.field-card__crop-glyph {
+.field-card__crop-scene {
   flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 52px;
-  height: 52px;
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
-  background: var(--brand-50);
-  color: var(--brand-600);
-}
-
-html.dark .field-card__crop-glyph {
-  background: color-mix(in srgb, var(--brand-500) 16%, transparent);
+  overflow: hidden;
 }
 
 .field-card__title-wrap {
@@ -144,9 +145,16 @@ html.dark .field-card__crop-glyph {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex-wrap: wrap;
+  row-gap: 2px;
   margin: var(--sp-1) 0 0;
   font-size: var(--fs-caption);
   color: var(--text-secondary);
+}
+
+/* 逐字段 nowrap：卡片变窄时按字段折行，而不是把汉字拆成一列 */
+.field-card__meta > span {
+  white-space: nowrap;
 }
 
 .field-card__crop {

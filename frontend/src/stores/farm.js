@@ -1,13 +1,11 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { farmApi } from '@/api'
-import { useLocationStore } from './location'
 import { useWeatherStore } from './weather'
 import { deriveFieldMetrics, fieldAdvice } from '@/utils/suitability'
 
 export const useFarmStore = defineStore('farm', () => {
   const fields = ref([])
-  const alerts = ref([])
   const loading = ref(false)
 
   /** 气象 store：地块指标推演的唯一数据来源（近 72h 聚合） */
@@ -66,27 +64,14 @@ export const useFarmStore = defineStore('farm', () => {
     return res
   }
 
-  async function loadAlerts() {
-    const loc = useLocationStore()
-    const res = await farmApi.alerts({
-      latitude: loc.selected.latitude,
-      longitude: loc.selected.longitude,
-      province: loc.selected.province,
-      city: loc.selected.city
-    })
-    alerts.value = res.alerts || []
-  }
-
   return {
     fields,
     fieldsWithMetrics,
-    alerts,
     loading,
     fieldStatus,
     loadFields,
     createField,
     deleteField,
-    doAction,
-    loadAlerts
+    doAction
   }
 })

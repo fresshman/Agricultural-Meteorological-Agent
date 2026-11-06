@@ -233,6 +233,7 @@ onMounted(() => {
   gap: var(--sp-5);
   max-width: 1200px;
   margin: 0 auto;
+  padding: var(--sp-5) var(--sp-6);
 }
 
 .calendar__crop {
@@ -366,6 +367,12 @@ onMounted(() => {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 767px) {
+  .calendar {
+    padding: var(--sp-4) var(--gutter-mobile);
   }
 }
 </style>

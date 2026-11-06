@@ -33,8 +33,8 @@ export const useWeatherStore = defineStore('weather', () => {
   const loading = ref(false)
   const error = ref(null)
   const lastUpdated = ref(null)
-  /** 已成功加载过的坐标，避免同一位置重复请求 */
-  const loadedKey = ref('')
+  /** 请求序号：切位置会并发发起加载，只认最新一次的结果，避免旧坐标覆盖新坐标 */
+  let requestSeq = 0
 
   /** 未来 7 天按日聚合 */
   const daily7 = computed(() => {
@@ -102,6 +102,7 @@ export const useWeatherStore = defineStore('weather', () => {
    * @returns {Promise<boolean>} 是否成功
    */
   async function loadWeather(hours = 168) {
+    const seq = ++requestSeq
     loading.value = true
     error.value = null
     try {
@@ -115,6 +116,8 @@ export const useWeatherStore = defineStore('weather', () => {
           throw err
         }
       }
+      // 等待期间位置已切换：这份响应属于旧坐标，整体丢弃
+      if (seq !== requestSeq) return false
 
       const list = Array.isArray(res?.data) ? res.data : []
       status.value = Boolean(res?.status) && list.length > 0
@@ -134,17 +137,16 @@ export const useWeatherStore = defineStore('weather', () => {
       }
 
       lastUpdated.value = new Date()
-      const loc = useLocationStore()
-      loadedKey.value = `${loc.selected.latitude},${loc.selected.longitude}`
       return status.value
     } catch (err) {
+      if (seq !== requestSeq) return false
       hourly.value = []
       current.value = null
       status.value = false
       error.value = err?.message || '气象加载失败'
       return false
     } finally {
-      loading.value = false
+      if (seq === requestSeq) loading.value = false
     }
   }
 
@@ -154,6 +156,7 @@ export const useWeatherStore = defineStore('weather', () => {
   }
 
   function reset() {
+    requestSeq += 1
     current.value = null
     hourly.value = []
     summary.value = ''
@@ -161,7 +164,7 @@ export const useWeatherStore = defineStore('weather', () => {
     isMock.value = false
     error.value = null
     lastUpdated.value = null
-    loadedKey.value = ''
+    loading.value = false
   }
 
   // 位置变更后自动刷新（全站共享位置的联动点）

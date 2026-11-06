@@ -308,22 +308,7 @@ describe('utils/suitability · fieldAdvice 地块建议', () => {
 })
 
 describe('utils/suitability · buildTodayTodo 今日待办', () => {
-  it('有地块警报 → 直接映射，最多 5 条', () => {
-    const alerts = Array.from({ length: 7 }, (_, i) => ({
-      field_id: `f${i}`, field_name: `地块${i}`, alert_type: '干旱预警', risk_level: '高风险', message: '建议立即灌溉'
-    }))
-    const todo = buildTodayTodo({ alerts })
-    expect(todo).toHaveLength(5)
-    expect(todo[0]).toMatchObject({
-      id: 'alert_f0_干旱预警',
-      title: '地块0 · 干旱预警',
-      subtitle: '建议立即灌溉',
-      level: '高风险',
-      source: 'alert'
-    })
-  })
-
-  it('无警报 → 基于今日气象的通用三项', () => {
+  it('有今日气象 → 通用三项', () => {
     const todo = buildTodayTodo({ daily7: [{ ...PERFECT, tempAvg: 22 }], cropType: '水稻' })
     expect(todo.map((t) => t.id)).toEqual(['generic_喷药', 'generic_灌溉', 'generic_采收'])
     expect(todo[0].title).toBe('今日喷药（水稻）')

@@ -37,7 +37,10 @@ const props = defineProps({
   compact: { type: Boolean, default: false }
 })
 
-const computable = computed(() => Number.isFinite(Number(props.value)))
+// Number(null) === 0，必须先显式排除 null/undefined，否则无数据会被画成 0 分
+const computable = computed(
+  () => props.value !== null && props.value !== undefined && Number.isFinite(Number(props.value))
+)
 const meta = computed(() => suitabilityMeta(props.value))
 const displayValue = computed(() => (computable.value ? Math.round(Number(props.value)) : '--'))
 

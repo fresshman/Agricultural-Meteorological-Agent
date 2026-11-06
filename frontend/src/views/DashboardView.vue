@@ -1,7 +1,16 @@
 <template>
   <div class="home">
     <!-- 气象横幅：位置 + 大温度 + 一句话农事建议 -->
-    <section class="hero" :class="heroTone">
+    <section class="hero" :class="[heroTone, { 'hero--on-dark': weather.available && sceneInfo.onDark }]">
+      <WeatherBackdrop
+        :temperature="temperature"
+        :humidity="humidity"
+        :wind-speed="windSpeed"
+        :precipitation="precipitation"
+        :condition-text="conditionText"
+        :timestamp="weather.current?.timestamp || null"
+        :active="weather.available"
+      />
       <div class="hero__left">
         <div class="hero__loc">
           <el-icon :size="14"><LocationInformation /></el-icon>
@@ -31,6 +40,27 @@
         <el-icon :size="12"><WarningFilled /></el-icon>
         <span>当前为模拟气象数据（未接入实时气象），仅供参考</span>
       </div>
+    </section>
+
+    <!-- 今日待办：与地块卡片同一份气象口径，不另造数据 -->
+    <section v-if="todos.length" class="todo">
+      <div class="week__head">
+        <h2 class="week__title">今日待办</h2>
+        <button type="button" class="todo__more" @click="gotoCalendar()">查看农事日历 →</button>
+      </div>
+      <ul class="todo__list">
+        <li v-for="t in todos" :key="t.id" class="todo__item">
+          <span class="todo__dot" :style="{ background: todoTone(t.level) }"></span>
+          <span class="todo__body">
+            <span class="todo__title">{{ t.title }}</span>
+            <span v-if="t.subtitle" class="todo__sub">{{ t.subtitle }}</span>
+          </span>
+          <span v-if="t.score !== null" class="todo__score num" :style="{ color: todoTone(t.level) }">
+            {{ t.score }}
+          </span>
+          <span v-else class="todo__score todo__score--none">--</span>
+        </li>
+      </ul>
     </section>
 
     <!-- 对话主入口 -->
@@ -91,13 +121,16 @@
 <script setup>
 import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { useWeatherStore } from '@/stores/weather'
 import { useLocationStore } from '@/stores/location'
 import { useFarmStore } from '@/stores/farm'
-import { OPERATIONS, scoreDay } from '@/utils/suitability'
+import { OPERATIONS, scoreDay, buildTodayTodo } from '@/utils/suitability'
 import { suitabilityMeta } from '@/utils/risk'
 import { beaufortLevel, normalizeWindDirection } from '@/utils/format'
 import SkeletonCard from '@/components/SkeletonCard.vue'
+import WeatherBackdrop from '@/components/WeatherBackdrop.vue'
+import { resolveWeatherScene } from '@/utils/weatherScene'
 
 const router = useRouter()
 const weather = useWeatherStore()
@@ -106,7 +139,10 @@ const farm = useFarmStore()
 
 onMounted(() => {
   if (!weather.available && !weather.loading) weather.loadWeather(168)
-  if (!farm.fields.length) farm.loadFields()
+  // 地块拿不到不应连带整个首页白屏：待办区自然收起，只在首次失败时提示一次
+  if (!farm.fields.length) {
+    farm.loadFields().catch(() => ElMessage.warning('地块数据加载失败，今日待办暂不可用'))
+  }
 })
 
 function pick(key) {
@@ -124,20 +160,47 @@ const humidityText = computed(() =>
   humidity.value === null ? '' : `湿度 ${Math.round(humidity.value)}%`
 )
 const weatherText = computed(() => {
-  if (!weather.available) return '数据加载中'
+  if (!weather.available) return weather.error ? '气象服务暂不可用' : '数据加载中'
   // 中科天机当前订阅只给 ws10m/t2m/rh2m/psz/tp，没有天气现象字段：
   // 拿不到就留空（由 v-if 收起这一行），不要显示占位的 '--'
   return weather.current?.text || weather.current?.condition || ''
+})
+/** 当前风速（m/s）：展示风级与背景动效共用同一份口径 */
+const windSpeed = computed(() => {
+  if (!weather.available) return null
+  const cur = weather.current || {}
+  const v = Number(cur.wind_speed ?? cur.windSpeed)
+  return Number.isFinite(v) ? v : null
 })
 const windText = computed(() => {
   if (!weather.available) return ''
   const cur = weather.current || {}
   const dir = normalizeWindDirection(cur.wind_direction || cur.windDir)
-  const mps = Number(cur.wind_speed ?? cur.windSpeed)
-  // 接口给的是 m/s，须换算成风级再拼"级"，否则显示成"1.4496349级"
-  const level = Number.isFinite(mps) ? beaufortLevel(mps) : null
+  const level = windSpeed.value === null ? null : beaufortLevel(windSpeed.value)
   return [dir, level === null ? '' : `风力${level}级`].filter(Boolean).join(' ')
 })
+/** 当前小时降水量（mm），驱动雨/雪强度 */
+const precipitation = computed(() => {
+  if (!weather.available) return null
+  const v = Number(weather.current?.precipitation)
+  return Number.isFinite(v) ? v : null
+})
+const conditionText = computed(() => weather.current?.text || weather.current?.condition || '')
+
+/** 与背景组件同源：用于决定文字用深色还是浅色 */
+const sceneInfo = computed(() =>
+  resolveWeatherScene(
+    {
+      temperature: temperature.value,
+      humidity: humidity.value,
+      windSpeed: windSpeed.value,
+      precipitation: precipitation.value,
+      conditionText: conditionText.value,
+      timestamp: weather.current?.timestamp || null
+    },
+    new Date()
+  )
+)
 
 const heroTone = computed(() => {
   const t = temperature.value
@@ -164,6 +227,34 @@ const todayAdvice = computed(() => {
   if (meta.level === 'care') return `今日部分农事受限，${displayTemp.value}°，建议减少户外作业，查看下方预报择期安排。`
   return `今日气象条件不佳，${displayTemp.value}°，不宜开展田间作业，注意防护。`
 })
+
+/** 地块作物一致时才在待办标题里带上作物名，多作物地块不臆断 */
+const todoCrop = computed(() => {
+  const crops = new Set((farm.fields || []).map((f) => f?.crop).filter(Boolean))
+  return crops.size === 1 ? [...crops][0] : ''
+})
+
+const todos = computed(() =>
+  buildTodayTodo({
+    daily7: weather.available ? weather.daily7 : [],
+    cropType: todoCrop.value,
+    fields: farm.fields
+  })
+)
+
+const TODO_TONE = {
+  good: 'var(--state-success)',
+  ok: 'var(--state-info)',
+  care: 'var(--state-warning)',
+  bad: 'var(--state-danger)',
+  unknown: 'var(--text-disabled)'
+}
+function todoTone(level) {
+  return TODO_TONE[level] || TODO_TONE.unknown
+}
+function gotoCalendar() {
+  router.push('/calendar')
+}
 
 const quickQuestions = [
   { emoji: '🌧️', label: '明天能下地吗', q: '未来三天天气适合下地干活吗？' },
@@ -217,6 +308,9 @@ function suitabilityColor(d) {
 
 /* ---- 气象横幅 ---- */
 .hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   display: flex;
   align-items: stretch;
   justify-content: space-between;
@@ -226,6 +320,38 @@ function suitabilityColor(d) {
   background: linear-gradient(135deg, color-mix(in srgb, var(--brand-500) 12%, var(--bg-card)), var(--bg-card));
   border: 1px solid var(--border-light);
   box-shadow: var(--shadow-2);
+  /* 文字配色随背景明暗切换的唯一入口 */
+  --hero-title: var(--text-title);
+  --hero-secondary: color-mix(in srgb, var(--text-secondary) 72%, var(--text-title));
+  --hero-tip-bg: color-mix(in srgb, var(--brand-500) 10%, transparent);
+  --hero-tip-border: color-mix(in srgb, var(--brand-500) 24%, transparent);
+  --hero-tip-label: var(--brand-600);
+  --hero-tip-text: var(--text-body);
+  --hero-mock-text: var(--state-warning);
+  --hero-mock-bg: color-mix(in srgb, var(--state-warning) 10%, transparent);
+  --hero-mock-border: color-mix(in srgb, var(--state-warning) 26%, transparent);
+}
+/* 动效背景在内容之下，文字始终保持最高层级 */
+.hero__left,
+.hero__tip,
+.hero__mock {
+  position: relative;
+  z-index: 1;
+}
+
+/* 夜间/降雨场景铺深色底：文字、建议卡、提示条统一切浅色 */
+html:not(.dark) .hero--on-dark {
+  --hero-title: #ffffff;
+  --hero-secondary: rgba(255, 255, 255, 0.88);
+  --hero-tip-bg: rgba(255, 255, 255, 0.14);
+  --hero-tip-border: rgba(255, 255, 255, 0.3);
+  --hero-tip-label: #c9f0da;
+  --hero-tip-text: rgba(255, 255, 255, 0.96);
+  --hero-mock-text: #ffe1a6;
+  --hero-mock-bg: rgba(255, 214, 130, 0.18);
+  --hero-mock-border: rgba(255, 214, 130, 0.4);
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 10px 30px rgba(10, 28, 46, 0.28);
 }
 .hero--hot { background: linear-gradient(135deg, color-mix(in srgb, var(--state-orange) 14%, var(--bg-card)), var(--bg-card)); }
 .hero--cold { background: linear-gradient(135deg, color-mix(in srgb, var(--state-info) 14%, var(--bg-card)), var(--bg-card)); }
@@ -235,7 +361,7 @@ function suitabilityColor(d) {
   align-items: center;
   gap: 6px;
   font-size: var(--fs-sm);
-  color: var(--text-secondary);
+  color: var(--hero-secondary);
 }
 .hero__main {
   display: flex;
@@ -248,41 +374,41 @@ function suitabilityColor(d) {
   font-weight: 200;
   line-height: 1;
   letter-spacing: -3px;
-  color: var(--text-title);
+  color: var(--hero-title);
 }
 .hero__temp-unit {
   font-size: 28px;
   font-weight: 300;
-  color: var(--text-secondary);
+  color: var(--hero-secondary);
   margin-left: -8px;
 }
 .hero__cond {
   font-size: var(--fs-h3);
   font-weight: 600;
-  color: var(--text-title);
+  color: var(--hero-title);
 }
 .hero__sub {
   font-size: var(--fs-sm);
-  color: var(--text-secondary);
+  color: var(--hero-secondary);
   margin-top: 2px;
 }
 
 .hero__tip {
   max-width: 340px;
-  background: color-mix(in srgb, var(--brand-500) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--brand-500) 24%, transparent);
+  background: var(--hero-tip-bg);
+  border: 1px solid var(--hero-tip-border);
   border-radius: 16px;
   padding: var(--sp-4) var(--sp-5);
   align-self: center;
 }
 .hero__tip-label {
   font-size: var(--fs-caption);
-  color: var(--brand-600);
+  color: var(--hero-tip-label);
   margin-bottom: 4px;
 }
 .hero__tip-text {
   font-size: var(--fs-body);
-  color: var(--text-body);
+  color: var(--hero-tip-text);
   line-height: 1.5;
 }
 .hero__mock {
@@ -291,13 +417,83 @@ function suitabilityColor(d) {
   gap: 6px;
   width: 100%;
   font-size: var(--fs-caption);
-  color: var(--state-warning);
-  background: color-mix(in srgb, var(--state-warning) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--state-warning) 26%, transparent);
+  color: var(--hero-mock-text);
+  background: var(--hero-mock-bg);
+  border: 1px solid var(--hero-mock-border);
   border-radius: 10px;
   padding: var(--sp-1) var(--sp-2);
   margin-top: var(--sp-3);
   flex-basis: 100%;
+}
+
+/* ---- 今日待办 ---- */
+.todo {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 20px;
+  padding: var(--sp-4) var(--sp-5);
+  box-shadow: var(--shadow-1);
+}
+.todo .week__head {
+  margin-bottom: var(--sp-2);
+}
+.todo__more {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: var(--fs-caption);
+  color: var(--brand-600);
+  cursor: pointer;
+}
+.todo__more:hover {
+  text-decoration: underline;
+}
+.todo__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.todo__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--border-light);
+}
+.todo__item:first-child {
+  border-top: none;
+}
+.todo__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.todo__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.todo__title {
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: var(--text-body);
+}
+.todo__sub {
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+}
+.todo__score {
+  font-size: var(--fs-h4);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.todo__score--none {
+  color: var(--text-disabled);
 }
 
 /* ---- 对话主入口 ---- */

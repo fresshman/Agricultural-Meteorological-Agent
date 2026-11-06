@@ -6,14 +6,14 @@ import logging
 import sqlite3
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from pathlib import Path
 from typing import AsyncGenerator, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from ..deps import get_agent_for_chat, get_optional_user, get_settings
+from ..deps import get_agent_for_chat, get_current_user, get_settings
 from ..schemas.chat import (
     ChatRequest, ChatResponse, DisasterWarningItem, DiseaseRiskItem,
     ComplianceInfo, UncertaintyInfo,
@@ -58,8 +58,14 @@ def _compute_nowcast(weather_list) -> Optional[str]:
     end = now + timedelta(hours=NOWCAST_HOURS)
 
     def _ts(d):
+        # weather_list 里的 timestamp 是 datetime（WeatherData.dict()），不是字符串；
+        # 只按字符串解析会让未来时次永远为空 → 短临降水提示从未触发
+        if isinstance(d, datetime):
+            return d
+        if isinstance(d, date):
+            return datetime.combine(d, datetime.min.time())
         try:
-            return datetime.fromisoformat(d)
+            return datetime.fromisoformat(str(d))
         except Exception:
             return None
 
@@ -164,15 +170,15 @@ def _build_response(response, req: ChatRequest, nowcast: Optional[str]) -> ChatR
 # ---------- 主问答接口 ----------
 
 @router.post("", response_model=ChatResponse)
-async def chat(req: ChatRequest, agent=Depends(get_agent_for_chat), user: dict | None = Depends(get_optional_user)):
+async def chat(req: ChatRequest, agent=Depends(get_agent_for_chat), user: dict = Depends(get_current_user)):
     """智能问答（完整返回，含会话记忆/合规/UQ/短临提示）"""
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="query 不能为空")
     if not req.session_id:
         req.session_id = f"s_{uuid.uuid4().hex[:12]}"
 
-    # 优先用登录用户身份（会话数据落该用户独立子库），未登录则回退到请求体 user_id
-    user_id = user["id"] if user else (req.user_id or "api_user")
+    # 身份只认服务端会话：未登录（AUTH_REQUIRED=true）由依赖直接 401，不接受请求体覆盖
+    user_id = user["id"]
 
     from src.models import UserType, CropType, Location
 
@@ -208,15 +214,15 @@ async def chat(req: ChatRequest, agent=Depends(get_agent_for_chat), user: dict |
 
 
 @router.post("/stream")
-async def chat_stream(req: ChatRequest, agent=Depends(get_agent_for_chat), user: dict | None = Depends(get_optional_user)):
+async def chat_stream(req: ChatRequest, agent=Depends(get_agent_for_chat), user: dict = Depends(get_current_user)):
     """智能问答（SSE 流式）：status 进度 + token 逐步推送，done 事件携带元数据"""
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="query 不能为空")
     if not req.session_id:
         req.session_id = f"s_{uuid.uuid4().hex[:12]}"
 
-    # 优先用登录用户身份（会话数据落该用户独立子库），未登录则回退到请求体 user_id
-    user_id = user["id"] if user else (req.user_id or "api_user")
+    # 身份只认服务端会话：未登录（AUTH_REQUIRED=true）由依赖直接 401，不接受请求体覆盖
+    user_id = user["id"]
 
     async def event_generator() -> AsyncGenerator[str, None]:
         started_at = time.perf_counter()

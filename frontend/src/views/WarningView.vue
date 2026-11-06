@@ -90,8 +90,8 @@
       </article>
     </div>
 
-    <!-- 7 天趋势 -->
-    <section class="warn-view__forecast card">
+    <!-- 7 天趋势：气象不可用时整块隐藏，避免留下只有标题的空卡片 -->
+    <section v-if="weather.daily7.length" class="warn-view__forecast card">
       <header class="warn-view__forecast-head">
         <h2 class="warn-view__forecast-title">未来 7 天气象与农事适宜度</h2>
       </header>
@@ -163,6 +163,7 @@ onMounted(() => {
   gap: var(--sp-5);
   max-width: 1200px;
   margin: 0 auto;
+  padding: var(--sp-5) var(--sp-6);
 }
 
 .warn-view__crop {
@@ -287,6 +288,9 @@ onMounted(() => {
 }
 
 @media (max-width: 767px) {
+  .warn-view {
+    padding: var(--sp-4) var(--gutter-mobile);
+  }
   .warn-view__bar {
     flex-direction: column;
     align-items: stretch;
