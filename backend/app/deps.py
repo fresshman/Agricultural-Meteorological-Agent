@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
-"""FastAPI 后端依赖注入：单例化 agent / weather_processor / amap + 用户会话 / 每用户农场管理器"""
+"""FastAPI 后端依赖注入：智能体、气象处理器、用户会话与农场管理器"""
 import logging
-import os
 import sys
 import threading
 from pathlib import Path
@@ -84,20 +83,6 @@ def get_weather_processor():
             api_key=settings.WEATHER_API_KEY,
             subscription_id=settings.WEATHER_SUBSCRIPTION_ID,
         )
-    return None
-
-
-@lru_cache(maxsize=1)
-def get_amap():
-    """单例获取高德地理编码客户端；依赖导入失败时降级为 None。"""
-    try:
-        from src.utils.amap_geocoding import AmapGeocoding
-    except Exception as e:
-        logger.error(f"高德地理编码依赖导入失败，定位功能将不可用: {e}")
-        return None
-    api_key = os.getenv("AMAP_API_KEY", "")
-    if api_key:
-        return AmapGeocoding(api_key)
     return None
 
 

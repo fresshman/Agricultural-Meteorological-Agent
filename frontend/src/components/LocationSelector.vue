@@ -23,7 +23,7 @@
     </template>
 
     <div class="loc-form">
-      <p class="loc-form__hint">选择省 / 市 / 区后自动解析经纬度，全站气象与农事推演都会随之更新。</p>
+      <p class="loc-form__hint">选择省 / 市 / 区后查询本地经纬度，全站气象与农事推演都会随之更新。</p>
 
       <label class="loc-field">
         <span class="loc-field__label">省份</span>

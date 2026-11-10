@@ -77,7 +77,7 @@
 | LLM | Qwen/Qwen3.8-27B（ModelScope 免费推理） | 大语言模型 |
 | Embedding | bge-small-zh-v1.5 | 文本向量化（知识检索） |
 | 向量库 | FAISS | 农业知识检索 |
-| 气象 / 地理 | 中科天机 / 高德地图 | 实时气象 + 行政区划 |
+| 气象 / 地理 | 中科天机 / 本地离线数据 | 实时气象 + 行政区划与中心坐标 |
 | 部署 | Docker + nginx | 单容器，监听 `7860` |
 
 ---
@@ -156,8 +156,8 @@ agricultural-meteorological-agent/
 │   ├── ui/
 │   │   └── farm_core.py      # 地块核心类（FarmField / FarmManager）
 │   └── utils/
-│       ├── amap_geocoding.py # 高德地图地理编码
-│       ├── china_regions.py  # 中国行政区划
+│       ├── china_regions.py  # 本地行政区划与中心坐标查询
+│       ├── china_regions.json # 省市区离线数据
 │       └── clients.py        # LLM/Embedding 客户端
 │
 ├── config/
@@ -245,7 +245,6 @@ docker-compose up --build
 | `EMBEDDING_MODEL` | Embedding 模型 | 默认 `bge-small-zh-v1.5` |
 | `WEATHER_API_KEY` | 实时气象 API 密钥 | 中科天机气象开放平台申请 |
 | `WEATHER_SUBSCRIPTION_ID` | 气象数据订阅 ID | 同上（订阅气象产品后获得） |
-| `AMAP_API_KEY` | 地理编码 / 行政区划 | 高德开放平台申请 |
 
 配置方式（二选一）：
 

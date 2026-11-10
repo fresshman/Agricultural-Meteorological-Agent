@@ -12,7 +12,6 @@ services:
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-bge-small-zh-v1.5}
       - WEATHER_API_KEY=${WEATHER_API_KEY:-}
       - WEATHER_SUBSCRIPTION_ID=${WEATHER_SUBSCRIPTION_ID:-}
-      - AMAP_API_KEY=${AMAP_API_KEY:-}
       # 访问形态：默认免登录（共享 guest 桶），设成 true 恢复登录门槛
       - AUTH_REQUIRED=${AUTH_REQUIRED:-false}
       - GUEST_USER_ID=${GUEST_USER_ID:-guest}

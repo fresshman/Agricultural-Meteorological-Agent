@@ -117,7 +117,7 @@ export const useLocationStore = defineStore('location', () => {
     }
   }
 
-  /** 依据当前省市区回填经纬度（高德地理编码），失败时保留原坐标 */
+  /** 依据当前省市区查询本地经纬度，失败时保留原坐标 */
   async function fetchCoordinates() {
     const s = selected.value
     loading.value = true

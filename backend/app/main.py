@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-from .deps import get_agent, get_weather_processor, get_amap, get_settings
+from .deps import get_agent, get_weather_processor, get_settings
 from .auth import _init_auth_db, session_secret_key, cookie_secure
 from .routers import health, chat, weather, location, farm, warning
 from .routers.auth import router as auth_router, auth_callback
@@ -47,11 +47,6 @@ async def lifespan(app: FastAPI):
     logger.info(f"Embedding 模型: {s.EMBEDDING_MODEL}")
     logger.info(f"LLM API Key: {'✅' if s.LLM_API_KEY else '❌ 未配置'}")
     logger.info(f"气象 API Key: {'✅' if s.WEATHER_API_KEY else '❌ 未配置'}")
-
-    try:
-        logger.info(f"高德 API Key: {'✅' if get_amap() else '❌ 未配置'}")
-    except Exception as e:
-        logger.error(f"❌ 高德客户端初始化失败: {e}")
 
     try:
         logger.info(f"气象处理器: {'✅' if get_weather_processor() else '⚠️ 未启用'}")
