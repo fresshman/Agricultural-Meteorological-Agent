@@ -22,6 +22,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Python 依赖（预编译 wheel，无需 build-essential）
 COPY backend/requirements.txt /app/backend/requirements.txt
 ENV PIP_DEFAULT_TIMEOUT=120
+# 创空间无 GPU：先装 CPU 版 torch，否则 torch>=2.0.0 会带上 CUDA 全家桶
+# （nvidia 依赖 2.5GB+，镜像膨胀到 ~10GB，部署拉镜像极慢甚至卡死）
+RUN pip install --no-cache-dir --timeout 120 --retries 5 torch --index-url https://download.pytorch.org/whl/cpu \
+    || pip install --no-cache-dir --timeout 120 --retries 5 torch --index-url https://mirrors.aliyun.com/pytorch-wheels/cpu/
 # 创空间的构建机在香港：清华镜像会拒掉境外 IP，pip 只报 "from versions: none"，
 # 看着像包不存在其实是源不可用。按 阿里云 → 清华 → 官方 PyPI 依次回退。
 RUN pip install --no-cache-dir --timeout 120 --retries 5 -i https://mirrors.aliyun.com/pypi/simple/ -r /app/backend/requirements.txt \
